@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { ADMIN_EMAIL } from './admin.js';
 import { AppEnv } from '../types.js';
 
 export const disputesRoute = new Hono<AppEnv>();
@@ -66,9 +67,21 @@ disputesRoute.post('/', async (c) => {
 
 // PUT /api/disputes/:id - Update dispute suggested items
 disputesRoute.put('/:id', async (c) => {
+  const user = c.get('user');
   const disputeId = c.req.param('id');
   const body = await c.req.json();
   const { suggested_items } = body;
+
+  const dispute = await db.queryOne<{ user_id: string; status: string }>(
+    'SELECT user_id, status FROM bill_disputes WHERE id = ?',
+    disputeId
+  );
+  if (!dispute) {
+    return c.json({ error: 'Dispute not found' }, 404);
+  }
+  if (dispute.user_id !== user.id && user.email !== ADMIN_EMAIL) {
+    return c.json({ error: 'Forbidden: 只有争议发起人或管理员可以修改调整方案' }, 403);
+  }
 
   const suggestedJson = JSON.stringify(suggested_items || []);
   await db.run(

@@ -1,12 +1,22 @@
 import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
-import { optionalAuthMiddleware } from '../middleware/auth.js';
+import { authMiddleware } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import { callLuna, LunaMessage, LunaContentPart } from '../ai/openai.js';
 import { AppEnv } from '../types.js';
 
 export const aiRoute = new Hono<AppEnv>();
-aiRoute.use('*', optionalAuthMiddleware);
+aiRoute.use('*', authMiddleware);
+aiRoute.use(
+  '*',
+  rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 30,
+    message: 'AI 识别与仲裁请求过于频繁，请 10 分钟后再试',
+    keyGenerator: (c) => c.get('userId') || c.req.header('x-real-ip') || 'unknown',
+  })
+);
 
 function cleanJsonResponse(txt: string): any {
   let cleaned = txt.trim();

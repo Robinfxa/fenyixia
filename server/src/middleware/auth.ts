@@ -3,9 +3,19 @@ import * as jose from 'jose';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'fenyixia-duckdb-secret-key-32bytes-long-min!'
-);
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('⚠️ WARNING: JWT_SECRET not found in production! Using ephemeral random secret for security.');
+      return new TextEncoder().encode(crypto.randomBytes(48).toString('hex'));
+    }
+    return new TextEncoder().encode('fenyixia-duckdb-secret-key-32bytes-long-min!');
+  }
+  return new TextEncoder().encode(secret);
+}
+
+const JWT_SECRET = getJwtSecret();
 
 export function hashSecret(secret: string): string {
   return crypto.pbkdf2Sync(secret, 'fenyixia_salt_secure', 10000, 32, 'sha256').toString('hex');

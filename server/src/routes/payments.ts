@@ -4,15 +4,34 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { db } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { ADMIN_EMAIL } from './admin.js';
 import { UPLOADS_DIR } from './upload.js';
 import { AppEnv } from '../types.js';
 
 export const paymentsRoute = new Hono<AppEnv>();
 paymentsRoute.use('*', authMiddleware);
 
+async function checkBillAccess(billId: string, userId: string, userEmail: string): Promise<boolean> {
+  if (userEmail === ADMIN_EMAIL) return true;
+  const bill = await db.queryOne<{ payer_id: string }>('SELECT payer_id FROM bills WHERE id = ?', billId);
+  if (!bill) return false;
+  if (bill.payer_id === userId) return true;
+  const isMember = await db.queryOne(
+    `SELECT bim.user_id FROM bill_items bi JOIN bill_item_members bim ON bim.item_id = bi.id WHERE bi.bill_id = ? AND bim.user_id = ? LIMIT 1`,
+    billId, userId
+  );
+  return Boolean(isMember);
+}
+
 // GET /api/payments/proofs/:billId - Get payment proofs for a bill
 paymentsRoute.get('/proofs/:billId', async (c) => {
+  const user = c.get('user');
   const billId = c.req.param('billId');
+
+  const hasAccess = await checkBillAccess(billId, user.id, user.email);
+  if (!hasAccess) {
+    return c.json({ error: 'Forbidden: 您无权查看该账单的凭证' }, 403);
+  }
 
   const proofs = await db.query<any>(
     'SELECT * FROM payment_proofs WHERE bill_id = ? ORDER BY created_at DESC',
@@ -21,7 +40,7 @@ paymentsRoute.get('/proofs/:billId', async (c) => {
 
   const formatted: any[] = [];
   for (const p of proofs) {
-    const user = await db.queryOne('SELECT id, name, emoji FROM users WHERE id = ?', p.user_id);
+    const u = await db.queryOne('SELECT id, name, emoji FROM users WHERE id = ?', p.user_id);
     formatted.push({
       id: p.id,
       bill_id: p.bill_id,
@@ -29,7 +48,7 @@ paymentsRoute.get('/proofs/:billId', async (c) => {
       image_url: p.image_url,
       note: p.note || '',
       created_at: p.created_at,
-      user: user || null,
+      user: u || null,
     });
   }
 
@@ -44,6 +63,11 @@ paymentsRoute.post('/proofs', async (c) => {
 
   if (!bill_id || !image_url) {
     return c.json({ error: 'bill_id and image_url are required' }, 400);
+  }
+
+  const hasAccess = await checkBillAccess(bill_id, user.id, user.email);
+  if (!hasAccess) {
+    return c.json({ error: 'Forbidden: 您不是该账单成员，无法添加付款凭证' }, 403);
   }
 
   const proofId = crypto.randomUUID();
@@ -74,6 +98,11 @@ paymentsRoute.post('/proofs/upload', async (c) => {
 
   if (!billId || !file || !(file instanceof File)) {
     return c.json({ error: 'bill_id and file are required' }, 400);
+  }
+
+  const hasAccess = await checkBillAccess(billId, user.id, user.email);
+  if (!hasAccess) {
+    return c.json({ error: 'Forbidden: 您不是该账单成员，无法上传付款凭证' }, 403);
   }
 
   const MAX_PROOF_BYTES = 10 * 1024 * 1024;

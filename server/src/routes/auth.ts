@@ -2,7 +2,14 @@ import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 import { hashSecret, verifySecret, signToken, authMiddleware } from '../middleware/auth.js';
+import { rateLimit, isLoginLocked, recordLoginFailure, resetLoginFailure } from '../middleware/rateLimit.js';
 import { AppEnv } from '../types.js';
+
+const authRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 15,
+  message: '登录尝试过于频繁，请 1 分钟后再试',
+});
 
 export const authRoute = new Hono<AppEnv>();
 
@@ -94,10 +101,9 @@ authRoute.post('/signup', async (c) => {
   }
 });
 
-// Login / SignIn
-authRoute.post('/login', async (c) => {
+async function handleLoginLogic(c: any) {
   try {
-    const body = await c.req.json();
+    const body = await c.req.json().catch(() => ({}));
     const email = body.email?.trim().toLowerCase();
     const pin = body.pin || body.password;
 
@@ -105,9 +111,26 @@ authRoute.post('/login', async (c) => {
       return c.json({ error: '请输入邮箱' }, 400);
     }
 
+    const clientIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+    const lockKey = `${clientIp}:${email}`;
+
+    const lockStatus = isLoginLocked(lockKey);
+    if (lockStatus.locked) {
+      return c.json(
+        {
+          error: `连续错误尝试过多，账号已临时锁定保护，请 ${lockStatus.remainingSec} 秒后再试`,
+          retry_after: lockStatus.remainingSec,
+        },
+        429
+      );
+    }
+
     const user = await db.queryOne('SELECT * FROM users WHERE email = ?', email);
     if (!user) {
-      return c.json({ error: '账号不存在，请先注册' }, 404);
+      recordLoginFailure(lockKey);
+      // Dummy check to prevent timing analysis
+      verifySecret('dummy_pin', 'd99f19ab39ac5e0931a4abf7f995f3a82c0d4a922f1113209c5d5ba6f49dc596');
+      return c.json({ error: '邮箱或 PIN 码错误' }, 401);
     }
 
     // Enforce password/PIN verification if user has a stored hash
@@ -118,9 +141,13 @@ authRoute.post('/login', async (c) => {
       }
       const isValid = verifySecret(String(pin), storedHash);
       if (!isValid) {
-        return c.json({ error: 'PIN 码或密码错误' }, 401);
+        recordLoginFailure(lockKey);
+        return c.json({ error: '邮箱或 PIN 码错误' }, 401);
       }
     }
+
+    // Login successful: clear any failure counter
+    resetLoginFailure(lockKey);
 
     const token = await signToken({ userId: user.id, email: user.email });
     const formatted = formatUser(user);
@@ -139,50 +166,11 @@ authRoute.post('/login', async (c) => {
     console.error('Login error:', err);
     return c.json({ error: err.message || '登录失败' }, 500);
   }
-});
+}
 
-// Alias for signin
-authRoute.post('/signin', async (c) => {
-  // Delegate to /login
-  const reqClone = c.req.raw.clone();
-  const body = await reqClone.json();
-  const email = body.email?.trim().toLowerCase();
-  const pin = body.pin || body.password;
-
-  if (!email) {
-    return c.json({ error: '请输入邮箱' }, 400);
-  }
-
-  const user = await db.queryOne('SELECT * FROM users WHERE email = ?', email);
-  if (!user) {
-    return c.json({ error: '账号不存在，请先注册' }, 404);
-  }
-
-  const storedHash = user.pin_hash || user.password_hash;
-  if (storedHash) {
-    if (!pin) {
-      return c.json({ error: '请输入 PIN 码或密码' }, 400);
-    }
-    const isValid = verifySecret(String(pin), storedHash);
-    if (!isValid) {
-      return c.json({ error: 'PIN 码或密码错误' }, 401);
-    }
-  }
-
-  const token = await signToken({ userId: user.id, email: user.email });
-  const formatted = formatUser(user);
-
-  return c.json({
-    success: true,
-    token,
-    user: formatted,
-    session: {
-      access_token: token,
-      token_type: 'bearer',
-      user: formatted
-    }
-  });
-});
+// Login / SignIn with rate limiting & brute force lockout
+authRoute.post('/login', authRateLimiter, handleLoginLogic);
+authRoute.post('/signin', authRateLimiter, handleLoginLogic);
 
 // Current user verification
 authRoute.get('/me', authMiddleware, async (c) => {

@@ -345,6 +345,23 @@ billsRoute.get('/:id', async (c) => {
     return c.json({ error: 'Bill not found' }, 404);
   }
 
+  // Authorization check (IDOR protection): only payer, participating member, or admin can view bill
+  const isAdmin = user.email === ADMIN_EMAIL;
+  if (!isAdmin && billRow.payer_id !== user.id) {
+    const isMember = await db.queryOne(
+      `SELECT bim.user_id
+       FROM bill_items bi
+       JOIN bill_item_members bim ON bim.item_id = bi.id
+       WHERE bi.bill_id = ? AND bim.user_id = ?
+       LIMIT 1`,
+      billId,
+      user.id
+    );
+    if (!isMember) {
+      return c.json({ error: 'Forbidden: 您不是该账单的付款人或参与成员' }, 403);
+    }
+  }
+
   const assembled = await assembleBill(billRow, user.id);
   return c.json({ bill: assembled, data: assembled });
 });
