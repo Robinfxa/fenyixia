@@ -178,6 +178,7 @@ const getApiDocs = (c: any) => {
 };
 
 app.get('/api', getApiDocs);
+app.get('/api/', getApiDocs);
 app.get('/api/docs', getApiDocs);
 
 // Mount Routes
