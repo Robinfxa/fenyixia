@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Bill, PaymentProof, Member, BillDispute } from '../../lib/types'
-import { fmtMoney, fmtISODate } from '../../lib/utils'
+import { fmtMoney, fmtISODate, copyToClipboard } from '../../lib/utils'
 import { toggleSettled, deleteBill } from '../../lib/api/bills'
 import { getPaymentProofs, uploadPaymentProof, toggleManualPayment, getManualPayments } from '../../lib/api/payments'
 import { fetchDispute, resolveDispute, updateDispute } from '../../lib/api/disputes'
@@ -182,11 +182,11 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
   }
 
   const handleCopy = async (text: string, label: string) => {
-    try {
-      await navigator.clipboard.writeText(text)
+    const ok = await copyToClipboard(text)
+    if (ok) {
       showToast(`已复制${label}`)
-    } catch {
-      showToast('复制失败')
+    } else {
+      showToast('复制失败，请长按手动复制')
     }
   }
 

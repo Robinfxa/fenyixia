@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { copyToClipboard } from '../lib/utils'
 import {
   adminListUsers,
   adminGenerateMagicLink,
@@ -132,12 +133,12 @@ export default function AdminPage() {
     setPollCount(0)
   }
 
-  function handleCopyUserCode(code: string) {
-    if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(code)
+  async function handleCopyUserCode(code: string) {
+    const ok = await copyToClipboard(code)
+    if (ok) {
+      setCodeCopied(true)
+      setTimeout(() => setCodeCopied(false), 2000)
     }
-    setCodeCopied(true)
-    setTimeout(() => setCodeCopied(false), 2000)
   }
 
   async function loadData() {

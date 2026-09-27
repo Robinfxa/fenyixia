@@ -7,6 +7,7 @@ import { getApiToken, createApiToken, revokeApiToken, type ApiToken } from '../l
 import { updateProfile, uploadAvatar } from '../lib/api/auth'
 import { compressAvatar, formatBytes } from '../lib/imageCompress'
 import { useToast } from '../contexts/ToastContext'
+import { copyToClipboard } from '../lib/utils'
 import BottomNav from '../components/Layout/BottomNav'
 import BottomSheet from '../components/shared/BottomSheet'
 
@@ -46,6 +47,9 @@ export default function SettingsPage({ onAddClick }: { onAddClick?: () => void }
     const [showToken, setShowToken] = useState(false)
     const [showEditProfile, setShowEditProfile] = useState(false)
     const [showSchemaDetails, setShowSchemaDetails] = useState(false)
+    const [copiedToken, setCopiedToken] = useState(false)
+    const [copiedUrl, setCopiedUrl] = useState(false)
+    const [copiedPrompt, setCopiedPrompt] = useState(false)
 
     const handleCopyAiPrompt = async () => {
         if (!apiToken) return
@@ -98,8 +102,14 @@ ${isAdmin ? `
    - 全局财务汇总：GET /summary?all=true
    - 全局账单查看：GET /bills?all=true
 ` : ''}`;
-        await navigator.clipboard.writeText(prompt)
-        showToast('已复制 AI 接入完整 Prompt')
+        const ok = await copyToClipboard(prompt)
+        if (ok) {
+            showToast('已复制 AI 接入完整 Prompt')
+            setCopiedPrompt(true)
+            setTimeout(() => setCopiedPrompt(false), 2000)
+        } else {
+            showToast('复制失败，请展开后手动选择复制')
+        }
     }
 
     useEffect(() => {
@@ -140,9 +150,20 @@ ${isAdmin ? `
         finally { setTokenWorking(false) }
     }
 
-    const handleCopy = async (text: string) => {
-        await navigator.clipboard.writeText(text)
-        showToast('已复制')
+    const handleCopy = async (text: string, type?: 'token' | 'url') => {
+        const ok = await copyToClipboard(text)
+        if (ok) {
+            showToast('已复制')
+            if (type === 'token') {
+                setCopiedToken(true)
+                setTimeout(() => setCopiedToken(false), 2000)
+            } else if (type === 'url') {
+                setCopiedUrl(true)
+                setTimeout(() => setCopiedUrl(false), 2000)
+            }
+        } else {
+            showToast('复制失败，请手动选择复制')
+        }
     }
 
     const handleSignOut = async () => {
@@ -308,8 +329,11 @@ ${isAdmin ? `
                                 <button onClick={() => setShowToken(s => !s)} style={btnStyle('var(--bg4)', 'var(--label2)')}>
                                     {showToken ? '隐藏' : '显示'}
                                 </button>
-                                <button onClick={() => handleCopy(apiToken.token)} style={btnStyle('var(--bg4)', 'var(--label2)')}>
-                                    复制
+                                <button
+                                    onClick={() => handleCopy(apiToken.token, 'token')}
+                                    style={btnStyle(copiedToken ? 'rgba(52,199,89,0.15)' : 'var(--bg4)', copiedToken ? '#34C759' : 'var(--label2)')}
+                                >
+                                    {copiedToken ? '已复制 ✓' : '复制'}
                                 </button>
                                 <button onClick={handleGenerate} disabled={tokenWorking} style={btnStyle('rgba(10,132,255,0.12)', 'var(--blue)')}>
                                     重新生成
@@ -342,13 +366,18 @@ ${isAdmin ? `
                                     <span>Base URL:</span>
                                     <span style={{ fontFamily: 'monospace', color: 'var(--label1)', wordBreak: 'break-all' }}>{apiBaseUrl}</span>
                                     <button
-                                        onClick={() => handleCopy(apiBaseUrl)}
+                                        onClick={() => handleCopy(apiBaseUrl, 'url')}
                                         style={{
-                                            background: 'rgba(10,132,255,0.1)', border: 'none', borderRadius: 4,
-                                            padding: '1px 6px', fontSize: 10, color: 'var(--blue)', cursor: 'pointer',
+                                            background: copiedUrl ? 'rgba(52,199,89,0.15)' : 'rgba(10,132,255,0.1)',
+                                            border: 'none', borderRadius: 4,
+                                            padding: '2px 8px', fontSize: 11,
+                                            color: copiedUrl ? '#34C759' : 'var(--blue)',
+                                            cursor: 'pointer',
+                                            fontWeight: 600,
+                                            transition: 'all 0.2s ease',
                                         }}
                                     >
-                                        复制
+                                        {copiedUrl ? '已复制 ✓' : '复制'}
                                     </button>
                                     {isCustomUrl ? (
                                         <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(48,209,88,0.12)', color: '#30D158' }}>
@@ -365,12 +394,13 @@ ${isAdmin ? `
                                     <button
                                         onClick={handleCopyAiPrompt}
                                         style={{
-                                            ...btnStyle('var(--blue)', '#fff'),
+                                            ...btnStyle(copiedPrompt ? '#34C759' : 'var(--blue)', '#fff'),
                                             display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: 11,
-                                            boxShadow: '0 2px 6px rgba(10,132,255,0.25)',
+                                            boxShadow: copiedPrompt ? '0 2px 6px rgba(52,199,89,0.3)' : '0 2px 6px rgba(10,132,255,0.25)',
+                                            transition: 'all 0.2s ease',
                                         }}
                                     >
-                                        📋 复制给 AI 的完整 Prompt
+                                        {copiedPrompt ? '✓ 已复制完整 Prompt' : '📋 复制给 AI 的完整 Prompt'}
                                     </button>
                                     <button
                                         onClick={() => setShowSchemaDetails(s => !s)}
