@@ -118,11 +118,7 @@ authRoute.post('/login', async (c) => {
       }
       const isValid = verifySecret(String(pin), storedHash);
       if (!isValid) {
-        // Fallback check: only allowed for default seeded admin account
-        const isAdminDefault = email === 'robinfxa@gmail.com' && String(pin) === '123456';
-        if (!isAdminDefault) {
-          return c.json({ error: 'PIN 码或密码错误' }, 401);
-        }
+        return c.json({ error: 'PIN 码或密码错误' }, 401);
       }
     }
 
@@ -168,8 +164,7 @@ authRoute.post('/signin', async (c) => {
       return c.json({ error: '请输入 PIN 码或密码' }, 400);
     }
     const isValid = verifySecret(String(pin), storedHash);
-    const isAdminDefault = email === 'robinfxa@gmail.com' && String(pin) === '123456';
-    if (!isValid && !isAdminDefault) {
+    if (!isValid) {
       return c.json({ error: 'PIN 码或密码错误' }, 401);
     }
   }
@@ -256,6 +251,45 @@ authRoute.put('/profile', authMiddleware, async (c) => {
   } catch (err: any) {
     console.error('Update profile error:', err);
     return c.json({ error: err.message || '更新个人资料失败' }, 500);
+  }
+});
+
+// Change PIN / password
+authRoute.post('/change-pin', authMiddleware, async (c) => {
+  try {
+    const user = c.get('user');
+    const body = await c.req.json().catch(() => ({}));
+    const { old_pin, new_pin } = body;
+
+    if (!new_pin || String(new_pin).trim().length < 6) {
+      return c.json({ error: '新 PIN 码长度至少为 6 位' }, 400);
+    }
+
+    const storedHash = user.pin_hash || user.password_hash;
+    if (storedHash) {
+      if (!old_pin) {
+        return c.json({ error: '请输入原 PIN 码' }, 400);
+      }
+      if (!verifySecret(String(old_pin), storedHash)) {
+        return c.json({ error: '原 PIN 码错误' }, 400);
+      }
+    }
+
+    const newHash = hashSecret(String(new_pin).trim());
+    await db.run(
+      'UPDATE users SET pin_hash = ?, password_hash = ? WHERE id = ?',
+      newHash,
+      newHash,
+      user.id
+    );
+
+    return c.json({
+      success: true,
+      message: 'PIN 码修改成功',
+    });
+  } catch (err: any) {
+    console.error('Change PIN error:', err);
+    return c.json({ error: err.message || '修改 PIN 码失败' }, 500);
   }
 });
 

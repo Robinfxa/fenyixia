@@ -12,8 +12,12 @@ export function hashSecret(secret: string): string {
 }
 
 export function verifySecret(secret: string, hash: string): boolean {
+  if (!hash || typeof hash !== 'string') return false;
   const computed = hashSecret(secret);
-  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
+  const bufA = Buffer.from(computed);
+  const bufB = Buffer.from(hash);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
 }
 
 export async function signToken(payload: { userId: string; email: string }): Promise<string> {

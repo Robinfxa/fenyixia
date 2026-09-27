@@ -204,24 +204,37 @@ export async function initDb(dbFilePath?: string): Promise<void> {
     console.warn('api_tokens column check/alter skipped:', err);
   }
 
-  // Ensure robinfxa@gmail.com exists as default admin user if not present
+  // Ensure robinfxa@gmail.com exists as default admin user with PIN 123432
   const adminEmail = 'robinfxa@gmail.com';
-  const existingAdmin = await queryOne('SELECT id FROM users WHERE email = ?', adminEmail);
+  // PBKDF2 sha256 hash of '123432' with 'fenyixia_salt_secure'
+  const adminPinHash = 'd99f19ab39ac5e0931a4abf7f995f3a82c0d4a922f1113209c5d5ba6f49dc596';
+  const existingAdmin = await queryOne('SELECT id, pin_hash FROM users WHERE email = ?', adminEmail);
   if (!existingAdmin) {
     const adminId = '00000000-0000-0000-0000-000000000001';
     await run(
-      `INSERT INTO users (id, name, email, emoji, color, pin_hash, profile_completed)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, name, email, emoji, color, pin_hash, password_hash, profile_completed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       adminId,
       'Robin (Admin)',
       adminEmail,
       '👑',
       '#6366F1',
-      // default 6-digit pin "123456" hash placeholder (sha256 of 123456)
-      '8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92',
+      adminPinHash,
+      adminPinHash,
       true
     );
-    console.log(`Default admin user (${adminEmail}) seeded.`);
+    console.log(`Default admin user (${adminEmail}) seeded with PIN 123432.`);
+  } else {
+    // Ensure admin user hash is up to date with 123432
+    await run(
+      `UPDATE users
+       SET pin_hash = ?, password_hash = ?
+       WHERE email = ?`,
+      adminPinHash,
+      adminPinHash,
+      adminEmail
+    );
+    console.log(`Admin user (${adminEmail}) PIN updated to 123432.`);
   }
 
   // Checkpoint to merge WAL into main database file to prevent WAL replay assertion bugs
