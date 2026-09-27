@@ -58,6 +58,7 @@ export function rateLimit(options: {
 // Dedicated failed login tracker to prevent 6-digit PIN brute forcing
 interface FailureRecord {
   failures: number;
+  lastFailure: number;
   lockedUntil: number;
 }
 
@@ -65,6 +66,7 @@ const failureStore = new Map<string, FailureRecord>();
 
 const MAX_FAILURES = 5;
 const LOCK_WINDOW_MS = 15 * 60 * 1000; // 15 minutes lockout
+const FAILURE_EXPIRY_MS = 15 * 60 * 1000; // Failures expire after 15 mins of no attempts
 
 export function isLoginLocked(key: string): { locked: boolean; remainingSec: number } {
   const record = failureStore.get(key);
@@ -78,7 +80,8 @@ export function isLoginLocked(key: string): { locked: boolean; remainingSec: num
     };
   }
 
-  if (now > record.lockedUntil) {
+  // If lock expired, or failures expired without reaching lockout, clean up
+  if ((record.lockedUntil > 0 && now > record.lockedUntil) || (now - record.lastFailure > FAILURE_EXPIRY_MS)) {
     failureStore.delete(key);
   }
   return { locked: false, remainingSec: 0 };
@@ -86,8 +89,12 @@ export function isLoginLocked(key: string): { locked: boolean; remainingSec: num
 
 export function recordLoginFailure(key: string): void {
   const now = Date.now();
-  const record = failureStore.get(key) || { failures: 0, lockedUntil: 0 };
+  let record = failureStore.get(key);
+  if (!record || now - record.lastFailure > FAILURE_EXPIRY_MS) {
+    record = { failures: 0, lastFailure: now, lockedUntil: 0 };
+  }
   record.failures++;
+  record.lastFailure = now;
   if (record.failures >= MAX_FAILURES) {
     record.lockedUntil = now + LOCK_WINDOW_MS;
   }
@@ -97,3 +104,4 @@ export function recordLoginFailure(key: string): void {
 export function resetLoginFailure(key: string): void {
   failureStore.delete(key);
 }
+
