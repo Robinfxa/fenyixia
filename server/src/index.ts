@@ -107,6 +107,79 @@ app.get('/api/health', (c) => {
   });
 });
 
+// Self-documenting API root & docs for AI Assistants & Developers
+const getApiDocs = (c: any) => {
+  const host = c.req.header('x-forwarded-host') || c.req.header('host') || 'localhost:3001';
+  const proto = c.req.header('x-forwarded-proto') || 'http';
+  const baseUrl = `${proto}://${host}/api`;
+
+  return c.json({
+    service: 'fenyixia-api',
+    name: '分一哈开放 API (AI Assistant & Developers)',
+    version: '1.0.0',
+    base_url: baseUrl,
+    authentication: {
+      type: 'Bearer Token',
+      header: 'Authorization: Bearer <token>',
+      instructions: '在前端「设置」中生成个人 AI API Token 并在 HTTP 请求头携带 Authorization: Bearer <token>'
+    },
+    endpoints: [
+      {
+        method: 'GET',
+        path: '/api/summary',
+        description: '获取当前账户全局财务总览与待结算清单',
+        query_params: {
+          all: 'boolean (admin only: 查看全站数据)'
+        }
+      },
+      {
+        method: 'GET',
+        path: '/api/contacts',
+        description: '获取联系人与好友列表'
+      },
+      {
+        method: 'GET',
+        path: '/api/bills',
+        description: '查询账单列表',
+        query_params: {
+          filter: 'all | pending | collect (默认 all)',
+          all: 'boolean (admin only: 跨用户查询平台所有账单)'
+        }
+      },
+      {
+        method: 'POST',
+        path: '/api/bills',
+        description: '创建新账单',
+        body: {
+          title: 'string (必填, 账单名称)',
+          icon: 'string (选填, 单个 Emoji 图标)',
+          date: 'string (选填, 日期 YYYY-MM-DD)',
+          description: 'string (选填, 备注说明)',
+          items: [
+            {
+              name: 'string (明细项目名称)',
+              price: 'number (金额)',
+              qty: 'number (数量, 默认 1)'
+            }
+          ]
+        }
+      },
+      {
+        method: 'POST',
+        path: '/api/bills/:id/mark-paid',
+        description: '标记账单结算状态',
+        body: {
+          settled: 'boolean (是否结清, 默认 true)',
+          member_id: 'string (选填, 仅结算指定成员)'
+        }
+      }
+    ]
+  });
+};
+
+app.get('/api', getApiDocs);
+app.get('/api/docs', getApiDocs);
+
 // Mount Routes
 app.route('/api/upload', uploadRoute);
 app.route('/api/auth', authRoute);

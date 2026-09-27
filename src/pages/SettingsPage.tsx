@@ -45,6 +45,62 @@ export default function SettingsPage({ onAddClick }: { onAddClick?: () => void }
     const [tokenWorking, setTokenWorking] = useState(false)
     const [showToken, setShowToken] = useState(false)
     const [showEditProfile, setShowEditProfile] = useState(false)
+    const [showSchemaDetails, setShowSchemaDetails] = useState(false)
+
+    const handleCopyAiPrompt = async () => {
+        if (!apiToken) return
+        const isAdmin = profile?.email === 'robinfxa@gmail.com'
+        const prompt = `# 分一哈 (fenyixia) 账单管理助手接入配置
+
+请作为我的个人记账与账单管理助理。你可以直接调用以下 HTTP API 管理我的账单与联系人：
+
+- Base URL: ${apiBaseUrl}
+- Authorization: Bearer ${apiToken.token}
+- Content-Type: application/json
+
+## 核心接口说明与请求格式：
+
+1. 获取财务总览与待结算清单
+   - 请求：GET /summary
+   - 返回：净收支 (net_balance)、待收回欠款 (pending_to_me)、待付欠款、好友账本往来 (friends_ledger) 等。
+
+2. 获取联系人列表
+   - 请求：GET /contacts
+   - 返回：所有联系人列表，包含联系人 ID、姓名、Emoji 图标。
+
+3. 查询账单列表
+   - 请求：GET /bills?filter=all (可选 filter: all | pending | collect)
+   - 返回：账单明细列表及参与成员。
+
+4. 创建新账单
+   - 请求：POST /bills
+   - JSON 请求体格式：
+\`\`\`json
+{
+  "title": "晚餐聚会",
+  "icon": "🍜",
+  "date": "2026-09-27",
+  "description": "周末聚会 (可选)",
+  "items": [
+    { "name": "菜品名称", "price": 48.0, "qty": 1 }
+  ]
+}
+\`\`\`
+
+5. 标记账单已付清
+   - 请求：POST /bills/:id/mark-paid
+   - JSON 请求体格式：
+\`\`\`json
+{ "settled": true }
+\`\`\`
+${isAdmin ? `
+6. 管理员系统透视（跨用户）：
+   - 全局财务汇总：GET /summary?all=true
+   - 全局账单查看：GET /bills?all=true
+` : ''}`;
+        await navigator.clipboard.writeText(prompt)
+        showToast('已复制 AI 接入完整 Prompt')
+    }
 
     useEffect(() => {
         getApiToken().then((res) => {
@@ -305,12 +361,66 @@ export default function SettingsPage({ onAddClick }: { onAddClick?: () => void }
                                     )}
                                 </div>
                                 <div style={{ marginTop: 4 }}>Header: <span style={{ fontFamily: 'monospace' }}>Authorization: Bearer {'<token>'}</span></div>
-                                <div style={{ marginTop: 6, fontWeight: 600, color: 'var(--label2)' }}>接口</div>
+                                <div style={{ display: 'flex', gap: 8, marginTop: 10, marginBottom: 8, flexWrap: 'wrap' }}>
+                                    <button
+                                        onClick={handleCopyAiPrompt}
+                                        style={{
+                                            ...btnStyle('var(--blue)', '#fff'),
+                                            display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: 11,
+                                            boxShadow: '0 2px 6px rgba(10,132,255,0.25)',
+                                        }}
+                                    >
+                                        📋 复制给 AI 的完整 Prompt
+                                    </button>
+                                    <button
+                                        onClick={() => setShowSchemaDetails(s => !s)}
+                                        style={{
+                                            ...btnStyle('var(--bg3)', 'var(--label2)'),
+                                            padding: '6px 10px', fontSize: 11,
+                                        }}
+                                    >
+                                        {showSchemaDetails ? '收起参数详情' : '展开参数格式 (JSON)'}
+                                    </button>
+                                </div>
+                                <div style={{ marginTop: 6, fontWeight: 600, color: 'var(--label2)' }}>接口概览</div>
                                 <div>GET /contacts — 联系人列表</div>
                                 <div>GET /bills?filter=all|pending|collect — 账单</div>
                                 <div>GET /summary — 汇总金额</div>
                                 <div>POST /bills — 创建账单</div>
                                 <div>POST /bills/:id/mark-paid — 标记已付</div>
+
+                                {showSchemaDetails && (
+                                    <div style={{
+                                        marginTop: 10, background: 'var(--bg3)', borderRadius: 8,
+                                        padding: '10px 12px', fontSize: 11, color: 'var(--label1)',
+                                        fontFamily: 'monospace', lineHeight: 1.5,
+                                    }}>
+                                        <div style={{ fontWeight: 600, color: 'var(--blue)', marginBottom: 4 }}>
+                                            POST /bills 请求体格式:
+                                        </div>
+                                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{JSON.stringify({
+  title: "晚餐聚会",
+  icon: "🍜",
+  date: "2026-09-27",
+  description: "周末聚会 (可选)",
+  items: [
+    { name: "菜品A", price: 48.0, qty: 1 }
+  ]
+}, null, 2)}
+                                        </pre>
+                                        <div style={{ fontWeight: 600, color: 'var(--blue)', marginTop: 8, marginBottom: 4 }}>
+                                            POST /bills/:id/mark-paid:
+                                        </div>
+                                        <pre style={{ margin: 0 }}>
+{JSON.stringify({ settled: true }, null, 2)}
+                                        </pre>
+                                        <div style={{ marginTop: 8, color: 'var(--label3)', fontSize: 10 }}>
+                                            💡 开发者自描述文档: 直接 GET <a href={apiBaseUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>{apiBaseUrl}</a> 即可获得全接口 JSON Schema 规范。
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div style={{ marginTop: 6, fontSize: 10, color: 'var(--label4)' }}>
                                     💡 提示：该地址会随部署环境自动切换；管理员亦可在控制台设置统一公网域名。
                                 </div>
