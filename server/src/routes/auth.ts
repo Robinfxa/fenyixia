@@ -111,8 +111,8 @@ async function handleLoginLogic(c: any) {
       return c.json({ error: '请输入邮箱' }, 400);
     }
 
-    const clientIp = c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
-    const lockKey = `${clientIp}:${email}`;
+    const clientIp = c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+    const lockKey = email;
 
     const lockStatus = isLoginLocked(lockKey);
     if (lockStatus.locked) {

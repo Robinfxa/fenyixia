@@ -28,7 +28,7 @@ export function rateLimit(options: {
   return async function rateLimitMiddleware(c: Context, next: Next) {
     const key = options.keyGenerator
       ? options.keyGenerator(c)
-      : c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+      : c.req.header('cf-connecting-ip') || c.req.header('x-real-ip') || c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
 
     const now = Date.now();
     const record = memoryStore.get(key);
