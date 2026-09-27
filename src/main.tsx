@@ -6,9 +6,12 @@ import { DebugProvider } from './contexts/DebugContext'
 import App from './App'
 import './styles/global.css'
 
+const rawBase = import.meta.env.BASE_URL || '/'
+const basename = rawBase === '/' ? undefined : rawBase.replace(/\/+$/, '')
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter basename="/fenyixia">
+    <BrowserRouter basename={basename}>
       <DebugProvider>
         <AuthProvider>
           <App />
@@ -17,3 +20,4 @@ createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </StrictMode>,
 )
+
