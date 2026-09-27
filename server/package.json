@@ -1,0 +1,28 @@
+{
+  "name": "fenyixia-server",
+  "version": "1.0.0",
+  "description": "Embedded DuckDB Backend & OpenAI 5.6luna Service for fenyixia",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test:db": "tsx src/db/test.ts",
+    "test:e2e": "tsx src/test-e2e.ts",
+    "test:ai-token": "tsx src/test-ai-token.ts",
+    "clean": "tsx src/db/clean.ts",
+    "test": "tsx src/test-e2e.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.8",
+    "duckdb": "^1.4.4",
+    "hono": "^4.7.2",
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}

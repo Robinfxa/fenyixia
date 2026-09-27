@@ -1,6 +1,15 @@
-/** Format money as 'CA$ 123' or 'CA$ 123.45' */
+/** Round financial amounts to 2 decimal places precisely (penny conservation) */
+export function roundCents(n: number): number {
+  if (typeof n !== 'number' || isNaN(n)) return 0
+  return Math.round((n + Number.EPSILON) * 100) / 100
+}
+
+/** Format money as 'CA$ 123' or 'CA$ 123.45', safe against NaN and -0.00 */
 export function fmtMoney(n: number): string {
-  return 'CA$ ' + (Number.isInteger(n) ? n : Number(n).toFixed(2))
+  if (typeof n !== 'number' || isNaN(n)) return 'CA$ 0'
+  const rounded = roundCents(n)
+  const normalized = Math.abs(rounded) < 0.00001 ? 0 : rounded
+  return 'CA$ ' + (Number.isInteger(normalized) ? normalized : normalized.toFixed(2))
 }
 
 /** ISO date string → Chinese display: '2025-02-19' → '2月19日' */

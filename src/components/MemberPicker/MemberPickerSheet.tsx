@@ -16,9 +16,23 @@ interface MemberPickerProps {
     tags: Tag[]
     selectedIds: string[]
     onChange: (ids: string[]) => void
+    selfMember?: Member | null
+    style?: React.CSSProperties
+    className?: string
+    scrollMaxHeight?: string | number
 }
 
-export default function MemberPickerSheet({ friends, groups, tags, selectedIds, onChange }: MemberPickerProps) {
+export default function MemberPickerSheet({
+    friends,
+    groups,
+    tags,
+    selectedIds,
+    onChange,
+    selfMember,
+    style,
+    className,
+    scrollMaxHeight,
+}: MemberPickerProps) {
     const selected = useMemo(() => new Set(selectedIds), [selectedIds])
     const [search, setSearch] = useState('')
     const [tagMembers, setTagMembers] = useState<Record<string, Member[]>>({})
@@ -33,10 +47,11 @@ export default function MemberPickerSheet({ friends, groups, tags, selectedIds, 
 
     const allMembersById = useMemo(() => {
         const m = new Map<string, Member>()
+        if (selfMember) m.set(selfMember.id, selfMember)
         groups.forEach(g => g.members.forEach(mem => { if (!m.has(mem.id)) m.set(mem.id, mem) }))
         friends.forEach(f => m.set(f.id, { id: f.id, name: f.alias || f.name, emoji: f.emoji, color: f.color }))
         return m
-    }, [friends, groups])
+    }, [friends, groups, selfMember])
 
     const toggle = (id: string) => {
         const next = new Set(selected)
@@ -88,15 +103,30 @@ export default function MemberPickerSheet({ friends, groups, tags, selectedIds, 
         if (isTagActive(t)) batchRemove(ids); else batchAdd(ids)
     }
 
+    const displayFriends = useMemo(() => {
+        if (!selfMember) return friends
+        const hasSelf = friends.some(f => f.id === selfMember.id)
+        if (hasSelf) return friends
+        const selfAsFriend: FriendWithAlias = {
+            id: selfMember.id,
+            name: selfMember.name,
+            emoji: selfMember.emoji,
+            color: selfMember.color,
+            friendship_id: '',
+            alias: '我',
+        }
+        return [selfAsFriend, ...friends]
+    }, [friends, selfMember])
+
     const filtered = useMemo(() => {
-        if (!search.trim()) return friends
+        if (!search.trim()) return displayFriends
         const q = search.toLowerCase()
-        return friends.filter(f =>
+        return displayFriends.filter(f =>
             f.name.toLowerCase().includes(q) ||
             (f.alias && f.alias.toLowerCase().includes(q)) ||
             (f._pinyinSortKey && f._pinyinSortKey.includes(q))
         )
-    }, [friends, search])
+    }, [displayFriends, search])
 
     const handleCreateGroup = async () => {
         if (!newGroupName.trim()) return
@@ -122,7 +152,7 @@ export default function MemberPickerSheet({ friends, groups, tags, selectedIds, 
     }
 
     return (
-        <div className="mp2-wrap">
+        <div className={`mp2-wrap${className ? ` ${className}` : ''}`} style={style}>
             {/* ── Fixed top: selected members ── */}
             <div className="mp2-selected-bar">
                 {selectedIds.length === 0 ? (
@@ -144,7 +174,7 @@ export default function MemberPickerSheet({ friends, groups, tags, selectedIds, 
                                         layout
                                     >
                                         <span className="mp2-sel-emoji">{m.emoji}</span>
-                                        <span className="mp2-sel-name">{m.name}</span>
+                                        <span className="mp2-sel-name">{id === selfMember?.id ? '我' : m.name}</span>
                                         <span className="mp2-sel-x">×</span>
                                     </motion.button>
                                 ) : null
@@ -158,7 +188,7 @@ export default function MemberPickerSheet({ friends, groups, tags, selectedIds, 
             </div>
 
             {/* ── Scroll area ── */}
-            <div className="mp2-scroll">
+            <div className="mp2-scroll" style={scrollMaxHeight ? { maxHeight: scrollMaxHeight } : undefined}>
                 {/* Groups */}
                 {groups.length > 0 && (
                     <div className="mp2-section">
@@ -254,7 +284,7 @@ export default function MemberPickerSheet({ friends, groups, tags, selectedIds, 
                                 whileTap={{ scale: 0.82 }}
                             >
                                 <span className="mp2-fav-emoji">{f.emoji}</span>
-                                <span className="mp2-fav-name">{f.alias || f.name}</span>
+                                <span className="mp2-fav-name">{f.id === selfMember?.id ? '我' : (f.alias || f.name)}</span>
                                 {selected.has(f.id) && (
                                     <motion.span
                                         className="mp2-fav-check"

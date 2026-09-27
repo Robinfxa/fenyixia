@@ -88,13 +88,6 @@ export default function LoginPage() {
     setError('')
     try {
       await signUp(email, pin)
-      if (inviteToken) {
-        const { supabase } = await import('../lib/supabase')
-        await supabase
-          .from('invitations')
-          .update({ status: 'accepted' })
-          .eq('token', inviteToken)
-      }
       setStep('verify-email')
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '注册失败')

@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Typed Supabase client
 The app SHALL initialize a Supabase client using environment variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. All service functions SHALL be exported as ES modules (not `window.DB`).

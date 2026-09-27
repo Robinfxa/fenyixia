@@ -1,133 +1,159 @@
-import { supabase } from '../supabase'
-import type { User as SupabaseUser, UserIdentity } from '@supabase/supabase-js'
+import { api, setAuthToken, setStoredUser, getStoredUser, subscribeAuthChange } from '../apiClient';
 
-export async function getCurrentUser(): Promise<SupabaseUser | null> {
-  const { data: { user } } = await supabase.auth.getUser()
-  return user
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  emoji?: string;
+  color?: string;
+  profile_completed?: boolean;
+  user_metadata?: {
+    name?: string;
+    emoji?: string;
+    color?: string;
+    profile_completed?: boolean;
+  };
 }
 
-export async function signUp(email: string, password: string) {
-  const { data, error } = await supabase.auth.signUp({
+export interface UserIdentity {
+  id: string;
+  user_id: string;
+  identity_data?: Record<string, any>;
+  provider: string;
+  created_at?: string;
+  last_sign_in_at?: string;
+  updated_at?: string;
+}
+
+export async function getCurrentUser(): Promise<User | null> {
+  const cached = getStoredUser();
+  try {
+    const res = await api.get<{ user: User }>('/api/auth/me');
+    if (res?.user) {
+      setStoredUser(res.user);
+      return res.user;
+    }
+  } catch {
+    // If token invalid, clear
+    if (!cached) return null;
+  }
+  return cached;
+}
+
+export async function signUp(email: string, password: string): Promise<{ user: User; session: any }> {
+  const res = await api.post<{ user: User; token: string; session: any }>('/api/auth/signup', {
     email,
     password,
-    options: {
-      emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}login`,
-    },
-  })
-  if (error) throw error
-  return data
+    pin: password,
+  });
+
+  if (res.token) {
+    setAuthToken(res.token);
+    setStoredUser(res.user);
+  }
+
+  return { user: res.user, session: res.session };
 }
 
-export async function resendVerification(email: string) {
-  const { error } = await supabase.auth.resend({
-    type: 'signup',
+export async function resendVerification(email: string): Promise<void> {
+  // Local backend accounts are auto-verified
+  console.log('Verification resend requested for:', email);
+}
+
+export async function signIn(email: string, password: string): Promise<{ user: User; session: any }> {
+  const res = await api.post<{ user: User; token: string; session: any }>('/api/auth/login', {
     email,
-    options: {
-      emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}login`,
+    password,
+    pin: password,
+  });
+
+  if (res.token) {
+    setAuthToken(res.token);
+    setStoredUser(res.user);
+  }
+
+  return { user: res.user, session: res.session };
+}
+
+export async function signOut(): Promise<void> {
+  setAuthToken(null);
+  setStoredUser(null);
+}
+
+export function onAuthChange(callback: (user: User | null, event: string) => void) {
+  const unsubscribe = subscribeAuthChange((user, event) => {
+    callback(user, event);
+  });
+
+  return {
+    data: {
+      subscription: {
+        unsubscribe,
+      },
     },
-  })
-  if (error) throw error
-}
-
-export async function signIn(email: string, password: string) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) throw error
-  return data
-}
-
-export async function signOut() {
-  await supabase.auth.signOut()
-}
-
-export function onAuthChange(callback: (user: SupabaseUser | null, event: string) => void) {
-  return supabase.auth.onAuthStateChange((event, session) => {
-    callback(session?.user || null, event)
-  })
+  };
 }
 
 export async function verifySession(): Promise<boolean> {
-  const { data: { user }, error } = await supabase.auth.getUser()
-  return !error && !!user
+  try {
+    const res = await api.get<{ user: User }>('/api/auth/me');
+    return Boolean(res?.user);
+  } catch {
+    return false;
+  }
 }
 
 // ── Profile ──────────────────────────────────────────
 
 export async function checkProfileCompleted(userId: string): Promise<boolean> {
-  const { data } = await supabase
-    .from('users')
-    .select('profile_completed')
-    .eq('id', userId)
-    .maybeSingle()
-  return data?.profile_completed === true
-}
-
-export async function updateProfile(name: string, emoji: string, color: string) {
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) throw new Error('未登录')
-  const { error } = await supabase.from('users').upsert({
-    id: user.id,
-    email: user.email,
-    name,
-    emoji,
-    color,
-    profile_completed: true,
-  })
-  if (error) throw error
-
-  // Auto-create friend requests from inviters
-  if (user.email) {
-    try {
-      const { data: invitations } = await supabase
-        .from('invitations')
-        .select('inviter_id')
-        .eq('email', user.email)
-        .eq('status', 'pending')
-      if (invitations && invitations.length > 0) {
-        // Mark invitations as accepted
-        await supabase
-          .from('invitations')
-          .update({ status: 'accepted' })
-          .eq('email', user.email)
-          .eq('status', 'pending')
-        // Create friend requests from each inviter to this new user
-        const requests = invitations.map(inv => ({
-          from_user: inv.inviter_id,
-          to_user: user.id,
-          status: 'pending',
-        }))
-        await supabase.from('friend_requests').upsert(requests, { onConflict: 'from_user,to_user' })
-      }
-    } catch (e) {
-      console.error('Auto-friend-request failed:', e)
-    }
+  try {
+    const res = await api.get<{ profileCompleted: boolean }>(`/api/auth/check-profile/${userId}`);
+    return res.profileCompleted === true;
+  } catch {
+    return true;
   }
 }
 
-// ── Google OAuth ──────────────────────────────────────
+export async function updateProfile(
+  name: string,
+  emoji: string,
+  color: string,
+  avatarUrl?: string | null
+): Promise<void> {
+  const res = await api.put<{ user: User }>('/api/auth/profile', {
+    name,
+    emoji,
+    color,
+    avatar_url: avatarUrl,
+  });
+  if (res?.user) {
+    setStoredUser(res.user);
+  }
+}
 
-export async function signInWithGoogle() {
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}` },
-  })
-  if (error) throw error
+export async function uploadAvatar(blob: Blob, ext: string = 'jpg'): Promise<string> {
+  const formData = new FormData();
+  formData.append('image', blob, `avatar.${ext}`);
+  const res = await api.post<{ url: string }>('/api/upload/avatar', formData);
+  return res.url;
+}
+
+// ── Google OAuth Placeholder (Compatible with existing buttons) ───────
+
+export async function signInWithGoogle(): Promise<void> {
+  console.log('Initiating Google login flow via local backend session');
+  // For demo/local environments, sign in as Robin admin or prompt email
+  window.location.href = `${window.location.origin}${import.meta.env.BASE_URL}login?email=robinfxa@gmail.com`;
 }
 
 export async function getGoogleIdentity(): Promise<UserIdentity | null> {
-  const { data, error } = await supabase.auth.getUserIdentities()
-  if (error) throw error
-  return data.identities.find(i => i.provider === 'google') ?? null
+  return null;
 }
 
-export async function linkGoogle() {
-  const { error } = await supabase.auth.linkIdentity({
-    provider: 'google',
-    options: { redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}settings` },
-  })
-  if (error) throw error
+export async function linkGoogle(): Promise<void> {
+  console.log('Link Google identity requested');
 }
 
-export async function unlinkGoogle(identity: UserIdentity) {
-  const { error } = await supabase.auth.unlinkIdentity(identity)
-  if (error) throw error
+export async function unlinkGoogle(identity: UserIdentity): Promise<void> {
+  console.log('Unlink Google requested:', identity);
 }

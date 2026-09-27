@@ -89,7 +89,7 @@ function computePreviewPrices(items: EditItem[]): Map<number, string> | null {
 }
 
 export default function BillSheet({ bill, friends, groups, tags, onClose, onSaved }: BillSheetProps) {
-    const isCreate = !bill
+    const isCreate = !bill || !bill.id
     const { user } = useAuth()
     const { profile } = useProfile()
 

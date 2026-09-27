@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { createElement } from 'react'
-import type { User } from '@supabase/supabase-js'
+import type { User } from '../lib/api/auth'
 import {
   getCurrentUser, onAuthChange,
   signIn as apiSignIn, signUp as apiSignUp, signOut as apiSignOut,

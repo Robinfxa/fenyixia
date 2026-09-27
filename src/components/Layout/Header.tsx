@@ -43,7 +43,15 @@ export default function Header({ dataFilter = 'all', collectCount = 0, displayMo
             className="av"
             style={profile?.color ? { background: profile.color } : undefined}
           >
-            {profile?.emoji || '😀'}
+            {profile?.avatar_url ? (
+              <img
+                src={profile.avatar_url}
+                alt=""
+                style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+              />
+            ) : (
+              profile?.emoji || '😀'
+            )}
           </div>
           <div className="av-name">{profile?.name || '加载中'}</div>
         </div>

@@ -1,37 +1,9 @@
-import { supabase } from '../supabase'
-import { updateBill } from './bills'
-import type { BillDispute, DisputeSuggestedItem } from '../types'
+import { api } from '../apiClient';
+import type { BillDispute, DisputeSuggestedItem } from '../types';
 
 export async function fetchDispute(billId: string): Promise<BillDispute | null> {
-  const { data, error } = await supabase
-    .from('bill_disputes')
-    .select('*')
-    .eq('bill_id', billId)
-    .eq('status', 'pending')
-    .maybeSingle()
-
-  if (error) throw error
-  if (!data) return null
-
-  // Fetch challenger info from public.users
-  let challenger: { id: string; name: string; emoji: string } | undefined
-  const { data: user } = await supabase
-    .from('users')
-    .select('id, name, emoji')
-    .eq('id', data.challenger_id)
-    .maybeSingle()
-  if (user) challenger = user
-
-  return {
-    id: data.id,
-    bill_id: data.bill_id,
-    challenger_id: data.challenger_id,
-    challenger,
-    reason: data.reason,
-    suggested_items: data.suggested_items as DisputeSuggestedItem[],
-    status: data.status,
-    created_at: data.created_at,
-  }
+  const res = await api.get<{ dispute: BillDispute | null }>(`/api/disputes/bill/${billId}`);
+  return res.dispute || null;
 }
 
 export async function createDispute(
@@ -40,25 +12,21 @@ export async function createDispute(
   reason: string,
   suggestedItems: DisputeSuggestedItem[]
 ): Promise<void> {
-  const { error } = await supabase.from('bill_disputes').insert({
+  await api.post('/api/disputes', {
     bill_id: billId,
     challenger_id: challengerId,
     reason,
     suggested_items: suggestedItems,
-  })
-  if (error) throw error
+  });
 }
 
 export async function updateDispute(
   disputeId: string,
   suggestedItems: DisputeSuggestedItem[]
 ): Promise<void> {
-  const { error } = await supabase
-    .from('bill_disputes')
-    .update({ suggested_items: suggestedItems })
-    .eq('id', disputeId)
-    .eq('status', 'pending')
-  if (error) throw error
+  await api.put(`/api/disputes/${disputeId}`, {
+    suggested_items: suggestedItems,
+  });
 }
 
 export async function resolveDispute(
@@ -69,24 +37,11 @@ export async function resolveDispute(
   billTitle?: string,
   billIcon?: string
 ): Promise<void> {
-  // Update dispute status
-  const { error } = await supabase
-    .from('bill_disputes')
-    .update({ status: accepted ? 'accepted' : 'rejected' })
-    .eq('id', disputeId)
-  if (error) throw error
-
-  // If accepted, update the bill with suggested items
-  if (accepted && suggestedItems && billTitle && billIcon) {
-    await updateBill(billId, {
-      title: billTitle,
-      icon: billIcon,
-      items: suggestedItems.map(item => ({
-        name: item.name,
-        price: item.price,
-        qty: item.qty,
-        member_ids: item.member_ids,
-      })),
-    })
-  }
+  await api.post(`/api/disputes/${disputeId}/resolve`, {
+    bill_id: billId,
+    accepted,
+    suggested_items: suggestedItems,
+    bill_title: billTitle,
+    bill_icon: billIcon,
+  });
 }

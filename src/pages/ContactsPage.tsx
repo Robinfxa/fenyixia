@@ -257,6 +257,7 @@ export default function ContactsPage({ onAddClick }: { onAddClick?: () => void }
       {/* Contact Profile Overlay */}
       {selectedContact && (
         <ContactProfileOverlay
+          key={selectedContact.id}
           friend={selectedContact}
           onClose={() => { setSelectedContact(null); mutateAllFriendData() }}
         />
@@ -267,12 +268,10 @@ export default function ContactsPage({ onAddClick }: { onAddClick?: () => void }
   )
 }
 
-// ── Inline Contact Profile Overlay ──
-// (Will be extracted to its own file in task 5.4)
-
-import { updateFriendAlias } from '../lib/api/friends'
+import { updateFriendAlias, deleteFriend } from '../lib/api/friends'
 import { getFriendTags, setFriendTags } from '../lib/api/tags'
 import { useTags } from '../hooks/useTags'
+import BottomSheet from '../components/shared/BottomSheet'
 
 function ContactProfileOverlay({
   friend,
@@ -286,6 +285,7 @@ function ContactProfileOverlay({
   const { tags: allTags } = useTags()
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!friend.friendship_id) return
@@ -311,6 +311,21 @@ function ContactProfileOverlay({
     }
   }
 
+  const handleDelete = async () => {
+    if (!friend.friendship_id) return
+    if (!window.confirm(`确定要解除与「${friend.alias || friend.name}」的好友关系吗？`)) return
+    setDeleting(true)
+    try {
+      await deleteFriend(friend.friendship_id)
+      showToast('已删除好友')
+      onClose()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '删除失败')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const toggleTag = (tagId: string) => {
     setSelectedTagIds(prev =>
       prev.includes(tagId) ? prev.filter(id => id !== tagId) : [...prev, tagId]
@@ -318,117 +333,126 @@ function ContactProfileOverlay({
   }
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-      zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-    }} onClick={onClose}>
-      <div
-        style={{
-          background: 'var(--bg2)', borderRadius: '20px 20px 0 0',
-          width: '100%', maxWidth: 430, padding: '24px 20px calc(env(safe-area-inset-bottom, 16px) + 20px)',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Profile header */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: '50%',
-            background: friend.color || 'var(--bg4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 28, flexShrink: 0,
-          }}>
-            {friend.emoji || '😀'}
-          </div>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--label1)' }}>
-              {friend.name}
-            </div>
-            {friend.alias && (
-              <div style={{ fontSize: 13, color: 'var(--label3)', marginTop: 2 }}>
-                备注: {friend.alias}
-              </div>
-            )}
-          </div>
+    <BottomSheet onClose={onClose} title="好友资料">
+      {/* Profile header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+        <div style={{
+          width: 56, height: 56, borderRadius: '50%',
+          background: friend.color || 'var(--bg4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 28, flexShrink: 0,
+        }}>
+          {friend.emoji || '😀'}
         </div>
-
-        {/* Alias input */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
-            备注名
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--label1)' }}>
+            {friend.alias || friend.name}
           </div>
-          <input
-            type="text"
-            placeholder="设置备注名"
-            value={alias}
-            onChange={e => setAlias(e.target.value)}
-            style={{
-              width: '100%', padding: '10px 14px', borderRadius: 10,
-              border: '1px solid var(--sep)', background: 'var(--bg3)',
-              color: 'var(--label1)', fontSize: 14, fontFamily: 'inherit',
-              outline: 'none', boxSizing: 'border-box',
-            }}
-          />
-        </div>
-
-        {/* Tags */}
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
-            标签
-          </div>
-          {allTags.length === 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--label3)' }}>
-              暂无标签，去标签页创建
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {allTags.map(tag => {
-                const selected = selectedTagIds.includes(tag.id)
-                return (
-                  <div
-                    key={tag.id}
-                    onClick={() => toggleTag(tag.id)}
-                    style={{
-                      padding: '6px 14px', borderRadius: 16,
-                      border: `1.5px solid ${selected ? tag.color : 'var(--sep)'}`,
-                      background: selected ? `${tag.color}20` : 'transparent',
-                      color: selected ? tag.color : 'var(--label2)',
-                      fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                    }}
-                  >
-                    {tag.name}
-                  </div>
-                )
-              })}
+          {friend.alias && (
+            <div style={{ fontSize: 12, color: 'var(--label3)', marginTop: 2 }}>
+              原昵称: {friend.name}
             </div>
           )}
         </div>
-
-        {/* Save / Close */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
-              background: 'var(--bg3)', color: 'var(--label2)', fontSize: 15,
-              fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
-              background: 'var(--blue)', color: '#fff', fontSize: 15,
-              fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              opacity: saving ? 0.5 : 1,
-            }}
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
-        </div>
       </div>
-    </div>
+
+      {/* Friend Email info card */}
+      {friend.email && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px', borderRadius: 10, background: 'var(--bg3)',
+          marginBottom: 16,
+        }}>
+          <span style={{ fontSize: 16 }}>✉️</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, color: 'var(--label3)', fontWeight: 500 }}>注册邮箱</div>
+            <div style={{ fontSize: 14, color: 'var(--label1)', userSelect: 'all', wordBreak: 'break-all' }}>
+              {friend.email}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alias input */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
+          备注名
+        </div>
+        <input
+          type="text"
+          placeholder="设置备注名"
+          value={alias}
+          onChange={e => setAlias(e.target.value)}
+          style={{
+            width: '100%', padding: '10px 14px', borderRadius: 10,
+            border: '1px solid var(--sep)', background: 'var(--bg3)',
+            color: 'var(--label1)', fontSize: 14, fontFamily: 'inherit',
+            outline: 'none', boxSizing: 'border-box',
+          }}
+        />
+      </div>
+
+      {/* Tags */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
+          标签
+        </div>
+        {allTags.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--label3)' }}>
+            暂无标签，去标签页创建
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {allTags.map(tag => {
+              const selected = selectedTagIds.includes(tag.id)
+              return (
+                <div
+                  key={tag.id}
+                  onClick={() => toggleTag(tag.id)}
+                  style={{
+                    padding: '6px 14px', borderRadius: 16,
+                    border: `1.5px solid ${selected ? tag.color : 'var(--sep)'}`,
+                    background: selected ? `${tag.color}20` : 'transparent',
+                    color: selected ? tag.color : 'var(--label2)',
+                    fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                  }}
+                >
+                  {tag.name}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Save & Delete */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <button
+          onClick={handleSave}
+          disabled={saving || deleting}
+          style={{
+            width: '100%', padding: '12px', borderRadius: 10, border: 'none',
+            background: 'var(--blue)', color: '#fff', fontSize: 15,
+            fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            opacity: saving ? 0.5 : 1,
+          }}
+        >
+          {saving ? '保存中...' : '保存修改'}
+        </button>
+
+        <button
+          onClick={handleDelete}
+          disabled={saving || deleting}
+          style={{
+            width: '100%', padding: '12px', borderRadius: 10, border: 'none',
+            background: 'rgba(255, 69, 58, 0.12)', color: 'var(--red)', fontSize: 14,
+            fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            opacity: deleting ? 0.5 : 1,
+          }}
+        >
+          {deleting ? '正在删除...' : '🗑️ 删除好友'}
+        </button>
+      </div>
+    </BottomSheet>
   )
 }

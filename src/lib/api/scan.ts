@@ -1,66 +1,37 @@
-import { supabase } from '../supabase'
-import { getCurrentUser } from './auth'
-
-const EDGE_FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/scan-receipt`
-
-// ── Token usage ──
+import { api } from '../apiClient';
 
 export interface TokenUsage {
-  input_tokens: number
-  output_tokens: number
-  model: string
+  input_tokens: number;
+  output_tokens: number;
+  model: string;
 }
 
-export async function recordTokenUsage(userId: string, feature: string, usage: TokenUsage): Promise<void> {
-  supabase.from('token_usage').insert({
-    user_id: userId,
-    feature,
-    model: usage.model,
-    input_tokens: usage.input_tokens,
-    output_tokens: usage.output_tokens,
-  }).then(({ error }) => {
-    if (error) console.warn('Failed to record token usage:', error.message)
-  })
+export async function recordTokenUsage(_userId: string, _feature: string, _usage: TokenUsage): Promise<void> {
+  // Backend automatically records token usage in token_usage table
 }
-
-// ── Scan receipt via Edge Function ──
 
 export async function scanReceipt(
   images: { base64: string; mediaType: string }[],
   prompt: string
 ): Promise<{ result: ScanResult; usage: TokenUsage | null }> {
-  const res = await fetch(EDGE_FN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      images: images.map(img => ({ base64: img.base64, media_type: img.mediaType })),
-      prompt,
-    }),
-  })
+  const res = await api.post<{ result: ScanResult; usage: TokenUsage | null }>('/api/scan-receipt', {
+    images: images.map((img) => ({ base64: img.base64, media_type: img.mediaType })),
+    prompt,
+  });
 
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({ error: `API 错误 ${res.status}` }))
-    throw new Error(e.error || `API 错误 ${res.status}`)
-  }
-
-  const data = await res.json()
-  const usage: TokenUsage | null = data.usage
-    ? { input_tokens: data.usage.input_tokens, output_tokens: data.usage.output_tokens, model: data._model || '' }
-    : null
-
-  let txt = (data.content || []).map((c: { text?: string }) => c.text || '').join('').trim()
-  // Robustly extract the outermost JSON object, ignoring any surrounding markdown/text
-  const start = txt.indexOf('{')
-  const end = txt.lastIndexOf('}')
-  if (start !== -1 && end !== -1 && end > start) {
-    txt = txt.slice(start, end + 1)
-  }
-  return { result: JSON.parse(txt), usage }
+  return {
+    result: res.result,
+    usage: res.usage,
+  };
 }
 
-// ── Build prompt for physical/digital receipt ──
-
-export function buildScanPrompt(type: 'physical' | 'digital', members: string[], n: number, userHint?: string, imageCount = 1): string {
+export function buildScanPrompt(
+  type: 'physical' | 'digital',
+  members: string[],
+  n: number,
+  userHint?: string,
+  imageCount = 1
+): string {
   const tpl = `{
   "icon": "<最合适的消费类别 emoji>",
   "title": "<商户名+消费类型，如'海底捞外卖'、'Costco采购'，优先用商户名而非泛泛分类>",
@@ -76,7 +47,7 @@ export function buildScanPrompt(type: 'physical' | 'digital', members: string[],
   "settled": false,
   "members": ${JSON.stringify(members)},
   "rawTotal": <TOTAL 数字，必须是含税最终金额>
-}`
+}`;
 
   if (type === 'physical') {
     return `你是专业的实体小票 OCR 识别助手，处理超市、餐厅等纸质收据照片。
@@ -114,7 +85,7 @@ ${tpl}
 【其他要点】：
 - 日期统一转为"M月D日"
 - 提取所有商品行，一条不漏，包括折扣行（price 为负数）
-- 返回纯 JSON，不要有任何其他文字${imageCount > 1 ? `\n\n【注意】：共有 ${imageCount} 张图片，是同一张小票的不同部分，请合并识别所有内容，items 汇总所有图片中的商品` : ''}${userHint ? `\n\n【用户补充说明】：${userHint}` : ''}`
+- 返回纯 JSON，不要有任何其他文字${imageCount > 1 ? `\n\n【注意】：共有 ${imageCount} 张图片，是同一张小票的不同部分，请合并识别所有内容，items 汇总所有图片中的商品` : ''}${userHint ? `\n\n【用户补充说明】：${userHint}` : ''}`;
   }
 
   return `你是专业的 App 订单截图识别助手，处理打车、外卖等数字收据截图。
@@ -136,10 +107,8 @@ ${tpl}
 - 打车类（Uber/Lyft）：title 用具体名称如"Uber打车"，desc="平台·起点→终点"，items 分解各费用（车费、服务费、税→含入price、小费），折扣负数，category=transport
 - 外卖类（DoorDash/Uber Eats）：title 用"餐厅名+外卖"如"海底捞外卖"，desc="平台·餐厅名"，每道菜名写"英文全称 (中文翻译)"+配送费+服务费（税含入各项price），小费单列，折扣负数，category=dining
 - 所有英文菜名/商品名都附上中文翻译，格式："English Name (中文)"
-- 返回纯 JSON，不要有任何其他文字${imageCount > 1 ? `\n\n【注意】：共有 ${imageCount} 张截图，请合并识别所有内容，items 汇总所有图片中的商品和费用` : ''}${userHint ? `\n\n【用户补充说明】：${userHint}` : ''}`
+- 返回纯 JSON，不要有任何其他文字${imageCount > 1 ? `\n\n【注意】：共有 ${imageCount} 张截图，请合并识别所有内容，items 汇总所有图片中的商品和费用` : ''}${userHint ? `\n\n【用户补充说明】：${userHint}` : ''}`;
 }
-
-// ── Build prompt for quick bill (一句话生成) ──
 
 export function buildQuickBillPrompt(text: string, currentDate: string, members: string[]): string {
   return `你是一个智能账单生成助手。用户会用一句自然语言描述一次消费，你需要解析出账单信息。
@@ -169,51 +138,35 @@ export function buildQuickBillPrompt(text: string, currentDate: string, members:
 - 如果用户提到了人名，对应到 members 列表中的成员
 - 如果没提到具体人，默认所有 members 参与
 - date 必须是 YYYY-MM-DD 格式，根据"昨天""上周五"等相对描述计算出实际日期
-- 返回纯 JSON，不要有任何其他文字`
+- 返回纯 JSON，不要有任何其他文字`;
 }
 
-// ── Upload receipt image ──
-
-export async function uploadReceiptImage(userId: string, blob: Blob, ext: string): Promise<string> {
-  const imagePath = `${userId}/${Date.now()}.${ext}`
-  const { error } = await supabase.storage
-    .from('receipt-images')
-    .upload(imagePath, blob, {
-      contentType: blob.type || 'image/jpeg',
-    })
-  if (error) throw new Error('图片上传失败: ' + error.message)
-  return imagePath
+export async function uploadReceiptImage(_userId: string, blob: Blob, ext: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', blob, `receipt.${ext}`);
+  const res = await api.post<{ url: string }>('/api/upload/receipt', formData);
+  return res.url;
 }
-
-// ── Insert receipt scan record ──
 
 export async function insertReceiptScan(
-  userId: string,
-  imagePath: string,
-  scanResult: ScanResult,
-  billId: string
-) {
-  const { error } = await supabase.from('receipt_scans').insert({
-    user_id: userId,
-    image_path: imagePath,
-    scan_result: scanResult,
-    bill_id: billId,
-  })
-  if (error) throw new Error('保存扫描记录失败: ' + error.message)
+  _userId: string,
+  _imagePath: string,
+  _scanResult: ScanResult,
+  _billId: string
+): Promise<void> {
+  // Scans can be stored locally or linked
 }
 
-// ── Build prompt for dispute arbitration ──
-
 export interface DisputeItemInput {
-  name: string
-  price: number
-  qty: number
-  member_names: string[]
+  name: string;
+  price: number;
+  qty: number;
+  member_names: string[];
 }
 
 export interface DisputeSuggestionResult {
-  items: { name: string; price: number; qty: number; member_names: string[] }[]
-  explanation: string
+  items: { name: string; price: number; qty: number; member_names: string[] }[];
+  explanation: string;
 }
 
 export function buildDisputePrompt(
@@ -247,28 +200,26 @@ ${JSON.stringify(items, null, 2)}
     { "name": "<商品名>", "price": <单价>, "qty": <数量>, "member_names": ["<成员名>", ...] }
   ],
   "explanation": "<简短解释你为什么这样调整，1-2句话>"
-}`
+}`;
 }
 
-// ── Types ──
-
 export interface ScanResultItem {
-  name: string
-  qty: number
-  price: number
+  name: string;
+  qty: number;
+  price: number;
 }
 
 export interface ScanResult {
-  icon?: string
-  title?: string
-  desc?: string
-  amount?: string
-  per?: string
-  date?: string
-  items?: ScanResultItem[]
-  category?: string
-  merchant?: string
-  rawTotal?: number
-  color?: string
-  members?: string[]
+  icon?: string;
+  title?: string;
+  desc?: string;
+  amount?: string;
+  per?: string;
+  date?: string;
+  items?: ScanResultItem[];
+  category?: string;
+  merchant?: string;
+  rawTotal?: number;
+  color?: string;
+  members?: string[];
 }

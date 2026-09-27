@@ -2,19 +2,19 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../hooks/useToast'
-import { supabase } from '../lib/supabase'
 import { useFriends } from '../hooks/useFriends'
+import { useGroups } from '../hooks/useGroups'
+import { useTags } from '../hooks/useTags'
 import { scanReceipt, buildScanPrompt, uploadReceiptImage, insertReceiptScan, recordTokenUsage } from '../lib/api/scan'
-import { createBill } from '../lib/api/bills'
 import { ICON_COLORS } from '../lib/utils'
 import type { Member } from '../lib/types'
 import type { ScanResult as ScanResultType, ScanResultItem } from '../lib/api/scan'
 import ScanTypeSelector from '../components/Scanner/ScanTypeSelector'
 import ImageUploader from '../components/Scanner/ImageUploader'
 import CropOverlay from '../components/Scanner/CropOverlay'
-import MemberSelector from '../components/Scanner/MemberSelector'
-import ScanResultView from '../components/Scanner/ScanResult'
-import MemberAssignment from '../components/Scanner/MemberAssignment'
+import MemberPickerSheet from '../components/MemberPicker/MemberPickerSheet'
+import BillSheet from '../components/SplitDetail/BillSheet'
+import type { Bill, BillItem } from '../lib/types'
 
 type Step = 'type-select' | 'upload' | 'crop' | 'preview' | 'member-select' | 'scanning' | 'result' | 'saving'
 
@@ -40,26 +40,45 @@ export default function ScanPage() {
   const [pendingBlob, setPendingBlob] = useState<Blob | null>(null)
   const [pendingSrc, setPendingSrc] = useState('')
 
-  // Members
+  // Members & Groups & Tags
   const { friends } = useFriends()
-  const allMembers = useMemo(() => {
-    if (!user) return []
-    const me: Member = { id: user.id, name: user.user_metadata?.name || '我', emoji: user.user_metadata?.emoji || '😀', color: user.user_metadata?.color }
-    const hasSelf = friends.some(f => f.id === user.id)
-    return hasSelf ? friends : [me, ...friends]
-  }, [user, friends])
-  const [selectedMembers, setSelectedMembers] = useState<Member[]>([])
+  const { groups } = useGroups()
+  const { tags } = useTags()
+
+  const selfMember: Member | null = useMemo(() => {
+    if (!user) return null
+    return {
+      id: user.id,
+      name: user.user_metadata?.name || '我',
+      emoji: user.user_metadata?.emoji || '😀',
+      color: user.user_metadata?.color,
+    }
+  }, [user])
+
+  const allMembersById = useMemo(() => {
+    const m = new Map<string, Member>()
+    if (selfMember) m.set(selfMember.id, selfMember)
+    groups.forEach(g => g.members.forEach(mem => { if (!m.has(mem.id)) m.set(mem.id, mem) }))
+    friends.forEach(f => m.set(f.id, { id: f.id, name: f.alias || f.name, emoji: f.emoji, color: f.color }))
+    return m
+  }, [friends, groups, selfMember])
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   useEffect(() => {
-    if (allMembers.length > 0 && selectedMembers.length === 0) {
-      setSelectedMembers([allMembers[0]!])
+    if (user && selectedIds.length === 0) {
+      setSelectedIds([user.id])
     }
-  }, [allMembers, selectedMembers.length])
+  }, [user, selectedIds.length])
+
+  const selectedMembers = useMemo(() => {
+    return selectedIds.map(id => allMembersById.get(id)).filter((m): m is Member => !!m)
+  }, [selectedIds, allMembersById])
 
   // Result
   const [resultData, setResultData] = useState<ScanResultType | null>(null)
   const [items, setItems] = useState<ScanResultItem[]>([])
-  const [assignments, setAssignments] = useState<Record<number, Set<string>>>({})
+  const [prefillBill, setPrefillBill] = useState<Bill | null>(null)
   const [error, setError] = useState('')
   const [userHint, setUserHint] = useState('')
 
@@ -106,14 +125,6 @@ export default function ScanPage() {
     setImages(prev => prev.filter((_, i) => i !== idx))
   }, [])
 
-  const handleToggleMember = useCallback((member: Member) => {
-    setSelectedMembers(prev => {
-      const exists = prev.find(m => m.id === member.id)
-      if (exists) return prev.filter(m => m.id !== member.id)
-      return [...prev, member]
-    })
-  }, [])
-
   // ── Scan ──
 
   const startScan = useCallback(async () => {
@@ -140,69 +151,62 @@ export default function ScanPage() {
       const resultItems = result.items || []
       setItems(resultItems)
 
-      const ids = selectedMembers.map(m => m.id)
-      const initAssign: Record<number, Set<string>> = {}
-      resultItems.forEach((_, idx) => { initAssign[idx] = new Set(ids) })
-      setAssignments(initAssign)
+      // Build a prefilled Bill for BillSheet
+      const dateStr = result.date || ''
+      const dateMatch = dateStr.match(/(\d+)月(\d+)日/)
+      const isoDate = dateMatch
+        ? `${new Date().getFullYear()}-${String(dateMatch[1]).padStart(2, '0')}-${String(dateMatch[2]).padStart(2, '0')}`
+        : new Date().toISOString().slice(0, 10)
+
+      const billItems: BillItem[] = resultItems.map(item => ({
+        name: item.name,
+        price: Number(item.price),
+        qty: item.qty || 1,
+        members: [...selectedMembers], // all members assigned by default
+      }))
+
+      const totalAmount = billItems.reduce((s, i) => s + i.price * i.qty, 0)
+
+      setPrefillBill({
+        id: '',
+        icon: result.icon || '🧾',
+        title: result.title || '扫描账单',
+        description: result.desc || result.merchant || '',
+        total_amount: totalAmount,
+        date: isoDate,
+        payer_id: user?.id || '',
+        payer_name: user?.user_metadata?.name || '',
+        payer_emoji: user?.user_metadata?.emoji || '😀',
+        payer_email: user?.email || '',
+        settled: false,
+        color: ICON_COLORS[result.icon || '🧾'] || 'linear-gradient(135deg,#8E8E93,#636366)',
+        items: billItems,
+        members: selectedMembers,
+        per_amount: totalAmount / (selectedMembers.length || 1),
+        my_share: totalAmount / (selectedMembers.length || 1),
+      })
 
       setStep('result')
     } catch (err) {
       setError((err as Error).message)
       setStep('member-select')
     }
-  }, [images, receiptType, selectedMembers, userHint])
+  }, [images, receiptType, selectedMembers, userHint, user])
 
-  // ── Save ──
-
-  const saveBill = useCallback(async () => {
+  // After BillSheet saves, upload receipt image & record scan
+  const handleBillSaved = useCallback(async () => {
     if (!resultData || !user || images.length === 0) return
-    setStep('saving')
-
     try {
-      // Upload first image (primary)
       const firstImage = images[0]!
       const ext = firstImage.blob.type === 'image/png' ? 'png' : 'jpg'
       const imagePath = await uploadReceiptImage(user.id, firstImage.blob, ext)
-
-      const dateStr = resultData.date || ''
-      const dateMatch = dateStr.match(/(\d+)月(\d+)日/)
-      const isoDate = dateMatch
-        ? `${new Date().getFullYear()}-${String(dateMatch[1]).padStart(2, '0')}-${String(dateMatch[2]).padStart(2, '0')}`
-        : new Date().toISOString().slice(0, 10)
-
-      const billItems = items.map((item, idx) => {
-        const assignedSet = assignments[idx]
-        const memberIds = assignedSet && assignedSet.size > 0 ? [...assignedSet] : [user.id]
-        return {
-          name: item.name,
-          price: Number(item.price),
-          qty: item.qty || 1,
-          member_ids: memberIds,
-        }
-      })
-
-      const billId = await createBill({
-        icon: resultData.icon || '🧾',
-        title: resultData.title || '扫描账单',
-        description: resultData.desc || resultData.merchant || '',
-        date: isoDate,
-        color: ICON_COLORS[resultData.icon || '🧾'] || 'linear-gradient(135deg,#8E8E93,#636366)',
-        items: billItems,
-      })
-
-      await insertReceiptScan(user.id, imagePath, resultData, billId)
-
-      toast.showToast('账单已保存')
-      setTimeout(() => navigate('/'), 800)
-    } catch (err) {
-      setError((err as Error).message)
-      setStep('result')
+      await insertReceiptScan(user.id, imagePath, resultData, '')
+    } catch {
+      // Non-critical: receipt image upload failure shouldn't block navigation
     }
-  }, [resultData, items, assignments, images, user, navigate, toast])
-
-  const totalAmount = items.reduce((s, i) => s + i.price * (i.qty || 1), 0)
-  const memberCount = selectedMembers.length || 1
-  const perAmount = totalAmount / memberCount
+    toast.showToast('账单已保存')
+    setTimeout(() => navigate('/'), 800)
+  }, [resultData, images, user, navigate, toast])
 
   return (
     <div className="scanner-page">
@@ -212,9 +216,34 @@ export default function ScanPage() {
       </div>
 
       {error && (
-        <div className="scanner-error">
-          {error}
-          <button onClick={() => setError('')}>✕</button>
+        <div className="scanner-error" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{error}</span>
+            <button onClick={() => setError('')} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14 }}>✕</button>
+          </div>
+          {(error.includes('OpenAI') || error.includes('凭证') || error.includes('API error') || error.includes('额度') || error.includes('quota') || error.includes('429')) && (
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>
+              {user?.email === 'robinfxa@gmail.com' ? (
+                <button
+                  onClick={() => navigate('/admin')}
+                  style={{
+                    background: 'rgba(255,255,255,0.25)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: 6,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ⚙️ 前往「管理面板」配置凭证
+                </button>
+              ) : (
+                <span>请联系管理员 (robinfxa@gmail.com) 检查 API 凭证配置</span>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -272,11 +301,20 @@ export default function ScanPage() {
 
       {step === 'member-select' && (
         <>
-          <MemberSelector
-            allMembers={allMembers}
-            selected={selectedMembers}
-            onToggle={handleToggleMember}
-          />
+          <div style={{ padding: '0 20px 8px' }}>
+            <div className="scanner-section-title" style={{ marginBottom: 0 }}>选择参与成员</div>
+          </div>
+          <div style={{ margin: '0 16px 12px', borderRadius: 16, overflow: 'hidden', border: '1px solid var(--sep)', background: 'var(--bg2)' }}>
+            <MemberPickerSheet
+              friends={friends}
+              groups={groups}
+              tags={tags}
+              selfMember={selfMember}
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              scrollMaxHeight="340px"
+            />
+          </div>
           <div className="scanner-hint-section">
             <div className="scanner-section-title">识别备注（可选）</div>
             <input
@@ -287,8 +325,13 @@ export default function ScanPage() {
               onChange={e => setUserHint(e.target.value)}
             />
           </div>
-          <button className="scanner-btn-primary" onClick={startScan} style={{ margin: '16px 20px' }}>
-            ✨ 开始识别
+          <button
+            className="scanner-btn-primary"
+            onClick={startScan}
+            disabled={selectedIds.length === 0}
+            style={{ margin: '16px 20px' }}
+          >
+            ✨ 开始识别 {selectedIds.length > 0 ? `(${selectedIds.length} 人)` : ''}
           </button>
         </>
       )}
@@ -300,36 +343,16 @@ export default function ScanPage() {
         </div>
       )}
 
-      {step === 'result' && resultData && (
-        <>
-          <ScanResultView
-            icon={resultData.icon || '🧾'}
-            title={resultData.title || '扫描账单'}
-            desc={resultData.desc || ''}
-            date={resultData.date || ''}
-            merchant={resultData.merchant || ''}
-            items={items}
-            totalAmount={totalAmount}
-            perAmount={perAmount}
-            onItemsChange={setItems}
-          />
-          <MemberAssignment
-            items={items}
-            members={selectedMembers}
-            assignments={assignments}
-            onAssignmentsChange={setAssignments}
-          />
-          <button className="scanner-btn-primary" onClick={saveBill} style={{ margin: '16px 20px' }}>
-            💾 保存为账单
-          </button>
-        </>
-      )}
-
-      {step === 'saving' && (
-        <div className="scanner-loading">
-          <div className="scanner-spinner" />
-          <div>保存中...</div>
-        </div>
+      {/* Result: open BillSheet with pre-filled data for full member assignment */}
+      {step === 'result' && prefillBill && (
+        <BillSheet
+          bill={prefillBill}
+          friends={friends}
+          groups={groups}
+          tags={tags}
+          onClose={() => { setPrefillBill(null); setStep('member-select') }}
+          onSaved={handleBillSaved}
+        />
       )}
     </div>
   )

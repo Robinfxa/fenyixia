@@ -1,0 +1,17 @@
+{
+  "workflow-guardrails": {
+    "enabled": false,
+    "PreToolUse": [
+      {
+        "matcher": "run_command|replace_file_content|write_to_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \".agents/hooks/pre_tool_use_policy.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

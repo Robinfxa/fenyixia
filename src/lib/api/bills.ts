@@ -1,58 +1,60 @@
-import { supabase } from '../supabase'
-import { ICON_COLORS } from '../utils'
-import type { Bill, BillItem, CreateBillData, UpdateBillData } from '../types'
-import { getCurrentUser } from './auth'
+import { api } from '../apiClient';
+import { ICON_COLORS, roundCents } from '../utils';
+import type { Bill, BillItem, CreateBillData, UpdateBillData } from '../types';
+import { getCurrentUser } from './auth';
 
 interface RawBillItem {
-  id: string
-  name: string
-  price: number | string
-  qty: number
-  sort_order: number
-  members: { user: { id: string; name: string; emoji: string } }[]
+  id: string;
+  name: string;
+  price: number | string;
+  qty: number;
+  sort_order: number;
+  members: { user: { id: string; name: string; emoji: string } }[];
 }
 
 interface RawBill {
-  id: string
-  icon: string
-  title: string
-  description: string | null
-  total_amount: number
-  date: string
-  payer_id: string
-  settled: boolean
-  color: string | null
-  payer: { id: string; name: string; emoji: string; email: string } | null
-  items: RawBillItem[]
+  id: string;
+  icon: string;
+  title: string;
+  description: string | null;
+  total_amount: number;
+  date: string;
+  payer_id: string;
+  settled: boolean;
+  color: string | null;
+  payer: { id: string; name: string; emoji: string; email: string } | null;
+  items: RawBillItem[];
 }
 
 function normalizeBill(raw: RawBill, currentUserId: string): Bill {
-  const items: BillItem[] = (raw.items || []).map(item => ({
+  const items: BillItem[] = (raw.items || []).map((item) => ({
     id: item.id,
     name: item.name,
-    price: Number(item.price),
-    qty: item.qty || 1,
-    members: (item.members || []).map(m => m.user),
-  }))
+    price: roundCents(Number(item.price) || 0),
+    qty: Number(item.qty) || 1,
+    members: (item.members || []).map((m) => m.user),
+  }));
 
-  const totalAmount = items.reduce((s, i) => s + i.price * i.qty, 0)
+  const totalAmount = roundCents(items.reduce((s, i) => s + roundCents(i.price * i.qty), 0));
 
-  let myShare = 0
-  items.forEach(item => {
-    const isMember = item.members.some(m => m.id === currentUserId)
+  let myShare = 0;
+  items.forEach((item) => {
+    const isMember = item.members.some((m) => m.id === currentUserId);
     if (isMember && item.members.length > 0) {
-      myShare += (item.price * item.qty) / item.members.length
+      const itemTotal = roundCents(item.price * item.qty);
+      myShare += itemTotal / item.members.length;
     }
-  })
+  });
+  myShare = roundCents(myShare);
 
-  const memberMap = new Map<string, { id: string; name: string; emoji: string }>()
-  items.forEach(item => {
-    item.members.forEach(m => memberMap.set(m.id, m))
-  })
-  if (raw.payer) memberMap.set(raw.payer.id, raw.payer)
-  const allMembers = [...memberMap.values()]
+  const memberMap = new Map<string, { id: string; name: string; emoji: string }>();
+  items.forEach((item) => {
+    item.members.forEach((m) => memberMap.set(m.id, m));
+  });
+  if (raw.payer) memberMap.set(raw.payer.id, raw.payer);
+  const allMembers = [...memberMap.values()];
 
-  const perAmount = allMembers.length > 0 ? totalAmount / allMembers.length : 0
+  const perAmount = allMembers.length > 0 ? totalAmount / allMembers.length : 0;
 
   return {
     id: raw.id,
@@ -66,163 +68,44 @@ function normalizeBill(raw: RawBill, currentUserId: string): Bill {
     payer_emoji: raw.payer?.emoji || '😀',
     payer_email: raw.payer?.email || '',
     settled: raw.settled,
-    color: raw.color || ICON_COLORS[raw.icon] || ICON_COLORS['🧾'] || '',
+    color: raw.color || (ICON_COLORS as Record<string, string>)[raw.icon] || (ICON_COLORS as Record<string, string>)['🧾'] || '#4F46E5',
     items,
     members: allMembers,
     per_amount: perAmount,
     my_share: myShare,
-  }
+    _hasMeProof: (raw as any)._hasMeProof || false,
+    _proofUserIds: new Set((raw as any)._proofUserIds || []),
+    _manualPaidUserIds: new Set((raw as any)._manualPaidUserIds || []),
+    _dispute: (raw as any)._dispute || null,
+  };
 }
 
 export async function fetchMyBills(): Promise<Bill[]> {
-  const user = await getCurrentUser()
-  if (!user) return []
+  const user = await getCurrentUser();
+  if (!user) return [];
 
-  const { data, error } = await supabase
-    .from('bills')
-    .select(`
-      *,
-      payer:users!bills_payer_id_fkey(id,name,emoji,email),
-      items:bill_items(
-        id, name, price, qty, sort_order,
-        members:bill_item_members(
-          user:users(id,name,emoji)
-        )
-      )
-    `)
-    .order('created_at', { ascending: false })
+  const res = await api.get<{ bills: RawBill[] }>('/api/bills');
+  const bills = res.bills || [];
 
-  if (error) throw error
-
-  return (data || []).filter((bill: RawBill) => {
-    if (bill.payer_id === user.id) return true
-    return bill.items?.some(item =>
-      item.members?.some(m => m.user?.id === user.id)
-    )
-  }).map((bill: RawBill) => normalizeBill(bill, user.id))
+  return bills.map((bill) => normalizeBill(bill, user.id));
 }
 
 export async function createBill(billData: CreateBillData): Promise<string> {
-  const user = await getCurrentUser()
-  if (!user) throw new Error('未登录')
+  const user = await getCurrentUser();
+  if (!user) throw new Error('未登录');
 
-  const totalAmount = billData.items.reduce((s, i) => s + i.price * (i.qty || 1), 0)
-  const color = billData.color || ICON_COLORS[billData.icon] || ICON_COLORS['🧾']
-
-  const { data: bill, error: billErr } = await supabase
-    .from('bills')
-    .insert({
-      icon: billData.icon,
-      title: billData.title,
-      description: billData.description || '',
-      total_amount: totalAmount,
-      date: billData.date || new Date().toISOString().slice(0, 10),
-      payer_id: user.id,
-      settled: false,
-      color,
-    })
-    .select()
-    .single()
-
-  if (billErr) throw billErr
-
-  const itemRows = billData.items.map((item, i) => ({
-    bill_id: bill.id,
-    name: item.name,
-    price: item.price,
-    qty: item.qty || 1,
-    sort_order: i,
-  }))
-
-  const { data: insertedItems, error: itemsErr } = await supabase
-    .from('bill_items')
-    .insert(itemRows)
-    .select()
-
-  if (itemsErr) throw itemsErr
-
-  const memberRows: { item_id: string; user_id: string }[] = []
-  insertedItems!.forEach((dbItem: { id: string }, i: number) => {
-    const memberIds = billData.items[i]!.member_ids || []
-    memberIds.forEach(uid => {
-      memberRows.push({ item_id: dbItem.id, user_id: uid })
-    })
-  })
-
-  if (memberRows.length > 0) {
-    const { error: memErr } = await supabase
-      .from('bill_item_members')
-      .insert(memberRows)
-    if (memErr) throw memErr
-  }
-
-  return bill.id
+  const res = await api.post<{ id: string; success: boolean }>('/api/bills', billData);
+  return res.id;
 }
 
-export async function updateBill(billId: string, billData: UpdateBillData) {
-  const totalAmount = billData.items.reduce((s, i) => s + i.price * (i.qty || 1), 0)
-
-  const { error: billErr } = await supabase
-    .from('bills')
-    .update({
-      title: billData.title,
-      icon: billData.icon,
-      description: billData.description,
-      total_amount: totalAmount,
-    })
-    .eq('id', billId)
-  if (billErr) throw billErr
-
-  const { data: oldItems } = await supabase
-    .from('bill_items')
-    .select('id')
-    .eq('bill_id', billId)
-  if (oldItems && oldItems.length > 0) {
-    const oldIds = oldItems.map((i: { id: string }) => i.id)
-    await supabase.from('bill_item_members').delete().in('item_id', oldIds)
-    await supabase.from('bill_items').delete().eq('bill_id', billId)
-  }
-
-  const itemRows = billData.items.map((item, i) => ({
-    bill_id: billId,
-    name: item.name,
-    price: item.price,
-    qty: item.qty || 1,
-    sort_order: i,
-  }))
-  const { data: insertedItems, error: itemsErr } = await supabase
-    .from('bill_items')
-    .insert(itemRows)
-    .select()
-  if (itemsErr) throw itemsErr
-
-  const memberRows: { item_id: string; user_id: string }[] = []
-  insertedItems!.forEach((dbItem: { id: string }, i: number) => {
-    const memberIds = billData.items[i]!.member_ids || []
-    memberIds.forEach(uid => {
-      memberRows.push({ item_id: dbItem.id, user_id: uid })
-    })
-  })
-  if (memberRows.length > 0) {
-    const { error: memErr } = await supabase
-      .from('bill_item_members')
-      .insert(memberRows)
-    if (memErr) throw memErr
-  }
+export async function updateBill(billId: string, billData: UpdateBillData): Promise<void> {
+  await api.put(`/api/bills/${billId}`, billData);
 }
 
-export async function deleteBill(billId: string) {
-  const { error } = await supabase
-    .from('bills')
-    .delete()
-    .eq('id', billId)
-  if (error) throw error
+export async function deleteBill(billId: string): Promise<void> {
+  await api.delete(`/api/bills/${billId}`);
 }
 
-export async function toggleSettled(billId: string, settled: boolean) {
-  const { error } = await supabase
-    .from('bills')
-    .update({ settled })
-    .eq('id', billId)
-  if (error) throw error
+export async function toggleSettled(billId: string, settled: boolean): Promise<void> {
+  await api.patch(`/api/bills/${billId}/settled`, { settled });
 }

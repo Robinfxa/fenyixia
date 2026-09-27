@@ -1,10 +1,14 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
-import { createTag, updateTag, deleteTag } from '../lib/api/tags'
+import { createTag, updateTag, deleteTag, getFriendsByTag, setTagFriends } from '../lib/api/tags'
 import type { Tag } from '../lib/api/tags'
 import { useTags, mutateTags } from '../hooks/useTags'
+import { useFriends } from '../hooks/useFriends'
+import { useGroups } from '../hooks/useGroups'
 import BottomNav from '../components/Layout/BottomNav'
+import BottomSheet from '../components/shared/BottomSheet'
+import MemberPickerSheet from '../components/MemberPicker/MemberPickerSheet'
 
 const TAG_COLORS = [
   '#0A84FF', '#30D158', '#FF9F0A', '#FF453A',
@@ -75,7 +79,7 @@ export default function TagsPage({ onAddClick }: { onAddClick?: () => void }) {
                   padding: '10px 18px', borderRadius: 16,
                   background: `${tag.color}20`, border: `1.5px solid ${tag.color}`,
                   color: tag.color, fontSize: 14, fontWeight: 600,
-                  cursor: 'pointer',
+                  cursor: 'pointer', transition: 'transform 0.15s',
                 }}
               >
                 {tag.name}
@@ -85,17 +89,17 @@ export default function TagsPage({ onAddClick }: { onAddClick?: () => void }) {
         )}
       </div>
 
-      {/* Create Tag Overlay */}
+      {/* Create Tag Sheet */}
       {showCreate && (
-        <TagFormOverlay
+        <TagFormSheet
           onClose={() => setShowCreate(false)}
           onSaved={() => { setShowCreate(false); mutateTags() }}
         />
       )}
 
-      {/* Edit Tag Overlay */}
+      {/* Edit Tag Sheet */}
       {editingTag && (
-        <TagFormOverlay
+        <TagFormSheet
           tag={editingTag}
           onClose={() => setEditingTag(null)}
           onSaved={() => { setEditingTag(null); mutateTags() }}
@@ -108,9 +112,9 @@ export default function TagsPage({ onAddClick }: { onAddClick?: () => void }) {
   )
 }
 
-// ── Tag Form Overlay ──
+// ── Tag Form Sheet (Create & Edit) ──
 
-function TagFormOverlay({
+function TagFormSheet({
   tag,
   onClose,
   onSaved,
@@ -122,9 +126,23 @@ function TagFormOverlay({
   onDelete?: () => void
 }) {
   const { showToast } = useToast()
+  const { friends } = useFriends()
+  const { groups } = useGroups()
+  const { tags } = useTags()
+
   const [name, setName] = useState(tag?.name || '')
   const [color, setColor] = useState(tag?.color || TAG_COLORS[0]!)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  // Load friends for the current tag
+  useEffect(() => {
+    if (!tag) return
+    getFriendsByTag(tag.id)
+      .then(members => setSelectedIds(members.map(m => m.id)))
+      .catch(console.error)
+  }, [tag])
 
   const handleSave = async () => {
     if (!name.trim()) return
@@ -132,9 +150,13 @@ function TagFormOverlay({
     try {
       if (tag) {
         await updateTag(tag.id, name.trim(), color)
+        await setTagFriends(tag.id, selectedIds)
         showToast('标签已更新')
       } else {
-        await createTag(name.trim(), color)
+        const created = await createTag(name.trim(), color)
+        if (selectedIds.length > 0 && created?.id) {
+          await setTagFriends(created.id, selectedIds)
+        }
         showToast('标签已创建')
       }
       onSaved()
@@ -145,104 +167,112 @@ function TagFormOverlay({
     }
   }
 
+  const handleDelete = () => {
+    if (!tag) return
+    if (!window.confirm(`确定要删除标签「${tag.name}」吗？`)) return
+    setDeleting(true)
+    if (onDelete) onDelete()
+  }
+
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-      zIndex: 100, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-    }} onClick={onClose}>
-      <div
-        style={{
-          background: 'var(--bg2)', borderRadius: '20px 20px 0 0',
-          width: '100%', maxWidth: 430,
-          padding: '24px 20px calc(env(safe-area-inset-bottom, 16px) + 20px)',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--label1)', marginBottom: 16 }}>
-          {tag ? '编辑标签' : '新建标签'}
-        </div>
-
-        {/* Tag name */}
-        <input
-          type="text"
-          placeholder="标签名称"
-          value={name}
-          onChange={e => setName(e.target.value)}
-          style={{
-            width: '100%', padding: '10px 14px', borderRadius: 10,
-            border: '1px solid var(--sep)', background: 'var(--bg3)',
-            color: 'var(--label1)', fontSize: 14, fontFamily: 'inherit',
-            outline: 'none', boxSizing: 'border-box', marginBottom: 16,
-          }}
-        />
-
-        {/* Color picker */}
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 8 }}>
-          颜色
-        </div>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-          {TAG_COLORS.map(c => (
-            <div
-              key={c}
-              onClick={() => setColor(c)}
-              style={{
-                width: 32, height: 32, borderRadius: '50%',
-                background: c, cursor: 'pointer',
-                border: color === c ? '3px solid var(--label1)' : '3px solid transparent',
-              }}
-            />
-          ))}
-        </div>
-
-        {/* Preview */}
-        <div style={{ marginBottom: 20 }}>
+    <BottomSheet onClose={onClose} title={tag ? '编辑标签' : '新建标签'} maxHeight="88vh">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Name input & Color preview */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="标签名称"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={{
+              flex: 1, padding: '12px 14px', borderRadius: 10,
+              border: '1px solid var(--sep)', background: 'var(--bg3)',
+              color: 'var(--label1)', fontSize: 15, fontFamily: 'inherit', outline: 'none',
+            }}
+          />
           <div style={{
-            display: 'inline-block', padding: '8px 16px', borderRadius: 16,
+            padding: '8px 14px', borderRadius: 14,
             background: `${color}20`, border: `1.5px solid ${color}`,
-            color: color, fontSize: 14, fontWeight: 600,
+            color: color, fontSize: 13, fontWeight: 600, flexShrink: 0,
           }}>
             {name || '预览'}
           </div>
         </div>
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          {onDelete && (
-            <button
-              onClick={onDelete}
-              style={{
-                padding: '12px 16px', borderRadius: 10, border: 'none',
-                background: 'rgba(255, 69, 58, 0.15)', color: 'var(--red)',
-                fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              删除
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
-              background: 'var(--bg3)', color: 'var(--label2)', fontSize: 15,
-              fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            取消
-          </button>
+        {/* Color picker */}
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
+            标签颜色
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {TAG_COLORS.map(c => (
+              <div
+                key={c}
+                onClick={() => setColor(c)}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%',
+                  background: c, cursor: 'pointer',
+                  border: color === c ? '3px solid var(--label1)' : '3px solid transparent',
+                  transform: color === c ? 'scale(1.1)' : 'scale(1)',
+                  transition: 'transform 0.15s, border-color 0.15s',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Member Selector based on MemberPickerSheet */}
+        <div style={{ marginTop: 4 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 8 }}>
+            标签成员 ({selectedIds.length} 人)
+          </div>
+          <div style={{
+            borderRadius: 14, overflow: 'hidden', border: '1px solid var(--sep)',
+            background: 'var(--bg2)',
+          }}>
+            <MemberPickerSheet
+              friends={friends}
+              groups={groups}
+              tags={tags.filter(t => t.id !== tag?.id)}
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              scrollMaxHeight="240px"
+            />
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
           <button
             onClick={handleSave}
-            disabled={saving || !name.trim()}
+            disabled={saving || deleting || !name.trim()}
             style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
+              width: '100%', padding: '12px', borderRadius: 10, border: 'none',
               background: 'var(--blue)', color: '#fff', fontSize: 15,
               fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
               opacity: saving || !name.trim() ? 0.5 : 1,
             }}
           >
-            {saving ? '保存中...' : '保存'}
+            {saving ? '保存中...' : (tag ? '保存修改' : '立即创建')}
           </button>
+
+          {tag && (
+            <button
+              onClick={handleDelete}
+              disabled={saving || deleting}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 10, border: 'none',
+                background: 'rgba(255, 69, 58, 0.12)', color: 'var(--red)', fontSize: 14,
+                fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                opacity: deleting ? 0.5 : 1,
+              }}
+            >
+              {deleting ? '正在删除...' : '🗑️ 删除此标签'}
+            </button>
+          )}
         </div>
       </div>
-    </div>
+    </BottomSheet>
   )
 }
+

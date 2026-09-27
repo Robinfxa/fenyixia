@@ -19,7 +19,7 @@ export default function DateRangePicker({ value, onChange }: DateRangePickerProp
     if (m > 12) { m = 1; y++ }
     // Don't allow future months
     if (y > currentYear || (y === currentYear && m > currentMonth)) return
-    onChange({ year: y, month: m })
+    onChange({ ...value, year: y, month: m, quarter: Math.ceil(m / 3) })
   }
 
   return (

@@ -1,10 +1,16 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '../contexts/ToastContext'
+import { useAuth } from '../hooks/useAuth'
 import { useFriends } from '../hooks/useFriends'
-import { createGroup, deleteGroup } from '../lib/api/groups'
+import { useTags } from '../hooks/useTags'
+import { createGroup, updateGroup, deleteGroup, setGroupMembers } from '../lib/api/groups'
+import type { Group } from '../lib/api/groups'
+import type { Member } from '../lib/types'
 import { useGroups, mutateGroups } from '../hooks/useGroups'
 import BottomNav from '../components/Layout/BottomNav'
+import BottomSheet from '../components/shared/BottomSheet'
+import MemberPickerSheet from '../components/MemberPicker/MemberPickerSheet'
 
 export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) {
   const navigate = useNavigate()
@@ -13,6 +19,7 @@ export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) 
   const { groups, loading: groupsLoading } = useGroups()
   const loading = groupsLoading && groups.length === 0
   const [showCreate, setShowCreate] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null)
 
   const handleDelete = async (groupId: string) => {
     try {
@@ -60,12 +67,17 @@ export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) 
             暂无群聊，点击右上角创建
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {groups.map(g => (
-              <div key={g.id} style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '14px', borderRadius: 12, background: 'var(--bg2)',
-              }}>
+              <div
+                key={g.id}
+                onClick={() => setEditingGroup(g)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '14px', borderRadius: 12, background: 'var(--bg2)',
+                  cursor: 'pointer', transition: 'background 0.2s',
+                }}
+              >
                 <div style={{
                   width: 44, height: 44, borderRadius: 10,
                   background: 'var(--bg3)', display: 'flex',
@@ -79,10 +91,10 @@ export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) 
                     {g.name}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--label3)', marginTop: 2 }}>
-                    {g.members.length} 人
+                    {g.members.length} 位成员
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {g.members.slice(0, 3).map(m => (
                     <div key={m.id} style={{
                       width: 24, height: 24, borderRadius: '50%',
@@ -103,6 +115,7 @@ export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) 
                       +{g.members.length - 3}
                     </div>
                   )}
+                  <div style={{ color: 'var(--label3)', fontSize: 16, marginLeft: 4 }}>›</div>
                 </div>
               </div>
             ))}
@@ -110,11 +123,21 @@ export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) 
         )}
       </div>
 
-      {/* Create Group Overlay */}
+      {/* Create Group Sheet */}
       {showCreate && (
-        <CreateGroupOverlay
+        <GroupFormSheet
           onClose={() => setShowCreate(false)}
-          onCreated={() => { setShowCreate(false); mutateGroups() }}
+          onSaved={() => { setShowCreate(false); mutateGroups() }}
+        />
+      )}
+
+      {/* Edit Group Sheet */}
+      {editingGroup && (
+        <GroupFormSheet
+          group={editingGroup}
+          onClose={() => setEditingGroup(null)}
+          onSaved={() => { setEditingGroup(null); mutateGroups() }}
+          onDelete={() => { handleDelete(editingGroup.id); setEditingGroup(null) }}
         />
       )}
 
@@ -123,157 +146,163 @@ export default function GroupsPage({ onAddClick }: { onAddClick?: () => void }) 
   )
 }
 
-// ── Create Group Overlay ──
+// ── Group Form BottomSheet (Create & Edit) ──
 
-function CreateGroupOverlay({
+function GroupFormSheet({
+  group,
   onClose,
-  onCreated,
+  onSaved,
+  onDelete,
 }: {
+  group?: Group
   onClose: () => void
-  onCreated: () => void
+  onSaved: () => void
+  onDelete?: () => void
 }) {
   const { showToast } = useToast()
-  const [name, setName] = useState('')
-  const [emoji, setEmoji] = useState('👥')
+  const { user } = useAuth()
   const { friends } = useFriends()
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [creating, setCreating] = useState(false)
+  const { groups } = useGroups()
+  const { tags } = useTags()
 
-  const toggleFriend = (id: string) => {
-    setSelectedIds(prev =>
-      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-    )
-  }
+  const [name, setName] = useState(group?.name || '')
+  const [emoji, setEmoji] = useState(group?.emoji || '👥')
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
-  const handleCreate = async () => {
+  // Initialize selected members from group or default to current user
+  const initialIds = useMemo(() => {
+    if (group) return group.members.map(m => m.id)
+    return user ? [user.id] : []
+  }, [group, user])
+
+  const [selectedIds, setSelectedIds] = useState<string[]>(initialIds)
+
+  useEffect(() => {
+    if (group) {
+      setSelectedIds(group.members.map(m => m.id))
+      setName(group.name)
+      setEmoji(group.emoji)
+    }
+  }, [group])
+
+  const selfMember: Member | null = useMemo(() => {
+    if (!user) return null
+    return {
+      id: user.id,
+      name: user.user_metadata?.name || '我',
+      emoji: user.user_metadata?.emoji || '😀',
+      color: user.user_metadata?.color,
+    }
+  }, [user])
+
+  const handleSave = async () => {
     if (!name.trim()) return
-    setCreating(true)
+    setSaving(true)
     try {
-      await createGroup(name.trim(), emoji, selectedIds)
-      showToast('群聊已创建')
-      onCreated()
+      if (group) {
+        await updateGroup(group.id, name.trim(), emoji)
+        await setGroupMembers(group.id, selectedIds)
+        showToast('群聊已更新')
+      } else {
+        await createGroup(name.trim(), emoji, selectedIds)
+        showToast('群聊已创建')
+      }
+      onSaved()
     } catch (e) {
-      showToast(e instanceof Error ? e.message : '创建失败')
+      showToast(e instanceof Error ? e.message : '保存失败')
     } finally {
-      setCreating(false)
+      setSaving(false)
     }
   }
 
+  const handleDelete = () => {
+    if (!group) return
+    if (!window.confirm(`确定要解散群聊「${group.name}」吗？`)) return
+    setDeleting(true)
+    if (onDelete) onDelete()
+  }
+
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-      zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} onClick={onClose}>
-      <div
-        style={{
-          background: 'var(--bg2)', borderRadius: 20,
-          width: 'calc(100% - 32px)', maxWidth: 430,
-          maxHeight: '80vh', overflow: 'hidden',
-          display: 'flex', flexDirection: 'column',
-        }}
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Scrollable content */}
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px 20px 16px' }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--label1)', marginBottom: 16 }}>
-            创建群聊
-          </div>
+    <BottomSheet onClose={onClose} title={group ? '编辑群聊' : '创建群聊'} maxHeight="88vh">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {/* Name and Emoji */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input
+            type="text"
+            value={emoji}
+            onChange={e => setEmoji(e.target.value)}
+            style={{
+              width: 52, padding: '10px 4px', borderRadius: 10, textAlign: 'center',
+              border: '1px solid var(--sep)', background: 'var(--bg3)',
+              color: 'var(--label1)', fontSize: 24, fontFamily: 'inherit', outline: 'none',
+            }}
+          />
+          <input
+            type="text"
+            placeholder="群聊名称"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            style={{
+              flex: 1, padding: '12px 14px', borderRadius: 10,
+              border: '1px solid var(--sep)', background: 'var(--bg3)',
+              color: 'var(--label1)', fontSize: 15, fontFamily: 'inherit', outline: 'none',
+            }}
+          />
+        </div>
 
-          {/* Group name */}
-          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-            <input
-              type="text"
-              value={emoji}
-              onChange={e => setEmoji(e.target.value)}
-              style={{
-                width: 48, padding: '10px', borderRadius: 10, textAlign: 'center',
-                border: '1px solid var(--sep)', background: 'var(--bg3)',
-                color: 'var(--label1)', fontSize: 20, fontFamily: 'inherit', outline: 'none',
-              }}
-            />
-            <input
-              type="text"
-              placeholder="群聊名称"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              style={{
-                flex: 1, padding: '10px 14px', borderRadius: 10,
-                border: '1px solid var(--sep)', background: 'var(--bg3)',
-                color: 'var(--label1)', fontSize: 14, fontFamily: 'inherit', outline: 'none',
-              }}
-            />
-          </div>
-
-          {/* Select friends */}
+        {/* Member Selector based on MemberPickerSheet */}
+        <div style={{ marginTop: 4 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 8 }}>
-            选择成员 ({selectedIds.length})
+            群成员 ({selectedIds.length} 人)
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {friends.map(f => {
-              const selected = selectedIds.includes(f.id)
-              return (
-                <div
-                  key={f.id}
-                  onClick={() => toggleFriend(f.id)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    padding: '10px 14px', borderRadius: 10, cursor: 'pointer',
-                    background: selected ? 'rgba(10, 132, 255, 0.1)' : 'var(--bg3)',
-                    border: selected ? '1px solid var(--blue)' : '1px solid transparent',
-                  }}
-                >
-                  <div style={{
-                    width: 32, height: 32, borderRadius: '50%',
-                    background: f.color || 'var(--bg4)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 16, flexShrink: 0,
-                  }}>
-                    {f.emoji || '😀'}
-                  </div>
-                  <div style={{ flex: 1, fontSize: 14, color: 'var(--label1)' }}>
-                    {f.alias || f.name}
-                  </div>
-                  <div style={{
-                    width: 22, height: 22, borderRadius: '50%',
-                    border: selected ? 'none' : '2px solid var(--sep)',
-                    background: selected ? 'var(--blue)' : 'transparent',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: '#fff', fontSize: 14, fontWeight: 700,
-                  }}>
-                    {selected ? '✓' : ''}
-                  </div>
-                </div>
-              )
-            })}
+          <div style={{
+            borderRadius: 14, overflow: 'hidden', border: '1px solid var(--sep)',
+            background: 'var(--bg2)',
+          }}>
+            <MemberPickerSheet
+              friends={friends}
+              groups={groups.filter(g => g.id !== group?.id)}
+              tags={tags}
+              selfMember={selfMember}
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              scrollMaxHeight="260px"
+            />
           </div>
         </div>
 
-        {/* Fixed buttons at bottom */}
-        <div style={{ flexShrink: 0, padding: '12px 20px 20px', display: 'flex', gap: 10, borderTop: '1px solid var(--sep)' }}>
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
           <button
-            onClick={onClose}
+            onClick={handleSave}
+            disabled={saving || deleting || !name.trim()}
             style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
-              background: 'var(--bg3)', color: 'var(--label2)', fontSize: 15,
-              fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            取消
-          </button>
-          <button
-            onClick={handleCreate}
-            disabled={creating || !name.trim()}
-            style={{
-              flex: 1, padding: '12px', borderRadius: 10, border: 'none',
+              width: '100%', padding: '12px', borderRadius: 10, border: 'none',
               background: 'var(--blue)', color: '#fff', fontSize: 15,
               fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-              opacity: creating || !name.trim() ? 0.5 : 1,
+              opacity: saving || !name.trim() ? 0.5 : 1,
             }}
           >
-            {creating ? '创建中...' : '创建'}
+            {saving ? '保存中...' : (group ? '保存修改' : '立即创建')}
           </button>
+
+          {group && (
+            <button
+              onClick={handleDelete}
+              disabled={saving || deleting}
+              style={{
+                width: '100%', padding: '12px', borderRadius: 10, border: 'none',
+                background: 'rgba(255, 69, 58, 0.12)', color: 'var(--red)', fontSize: 14,
+                fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                opacity: deleting ? 0.5 : 1,
+              }}
+            >
+              {deleting ? '正在删除...' : '🗑️ 解散并删除群聊'}
+            </button>
+          )}
         </div>
       </div>
-    </div>
+    </BottomSheet>
   )
 }

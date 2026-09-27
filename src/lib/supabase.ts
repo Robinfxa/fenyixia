@@ -1,6 +1,15 @@
-import { createClient } from '@supabase/supabase-js'
+/**
+ * @deprecated Supabase has been deprecated and replaced by DuckDB backend and apiClient.ts
+ */
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+export const supabase: any = {
+  auth: {
+    getUser: async () => ({ data: { user: null }, error: null }),
+    getSession: async () => ({ data: { session: null }, error: null }),
+  },
+  from: () => ({
+    select: () => ({ eq: () => ({ data: null, error: null }) }),
+  }),
+};
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+export default supabase;

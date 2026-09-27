@@ -3,15 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../hooks/useToast'
 import { useFriends } from '../hooks/useFriends'
+import { useGroups } from '../hooks/useGroups'
+import { useTags } from '../hooks/useTags'
 import { scanReceipt, buildQuickBillPrompt } from '../lib/api/scan'
-import { createBill } from '../lib/api/bills'
 import { ICON_COLORS } from '../lib/utils'
-import type { Member } from '../lib/types'
+import type { Member, Bill, BillItem } from '../lib/types'
 import type { ScanResult, ScanResultItem } from '../lib/api/scan'
-import ScanResultView from '../components/Scanner/ScanResult'
-import MemberAssignment from '../components/Scanner/MemberAssignment'
-
-const EDGE_FN_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/scan-receipt`
+import MemberPickerSheet from '../components/MemberPicker/MemberPickerSheet'
+import BillSheet from '../components/SplitDetail/BillSheet'
 
 type Step = 'input' | 'generating' | 'result' | 'saving'
 
@@ -24,27 +23,45 @@ export default function QuickBillPage() {
   const [text, setText] = useState('')
   const [error, setError] = useState('')
 
-  // Members
+  // Members & Groups & Tags
   const { friends } = useFriends()
-  const allMembers = useMemo(() => {
-    if (!user) return []
-    const me: Member = { id: user.id, name: user.user_metadata?.name || '我', emoji: user.user_metadata?.emoji || '😀', color: user.user_metadata?.color }
-    const hasSelf = friends.some(f => f.id === user.id)
-    return hasSelf ? friends : [me, ...friends]
-  }, [user, friends])
-  const [selectedMembers, setSelectedMembers] = useState<Member[]>([])
+  const { groups } = useGroups()
+  const { tags } = useTags()
 
-  // Sync selectedMembers when allMembers first loads
-  useEffect(() => {
-    if (allMembers.length > 0 && selectedMembers.length === 0) {
-      setSelectedMembers(allMembers)
+  const selfMember: Member | null = useMemo(() => {
+    if (!user) return null
+    return {
+      id: user.id,
+      name: user.user_metadata?.name || '我',
+      emoji: user.user_metadata?.emoji || '😀',
+      color: user.user_metadata?.color,
     }
-  }, [allMembers, selectedMembers.length])
+  }, [user])
+
+  const allMembersById = useMemo(() => {
+    const m = new Map<string, Member>()
+    if (selfMember) m.set(selfMember.id, selfMember)
+    groups.forEach(g => g.members.forEach(mem => { if (!m.has(mem.id)) m.set(mem.id, mem) }))
+    friends.forEach(f => m.set(f.id, { id: f.id, name: f.alias || f.name, emoji: f.emoji, color: f.color }))
+    return m
+  }, [friends, groups, selfMember])
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+
+  useEffect(() => {
+    if (user && selectedIds.length === 0) {
+      setSelectedIds([user.id])
+    }
+  }, [user, selectedIds.length])
+
+  const selectedMembers = useMemo(() => {
+    return selectedIds.map(id => allMembersById.get(id)).filter((m): m is Member => !!m)
+  }, [selectedIds, allMembersById])
 
   // Result
   const [resultData, setResultData] = useState<ScanResult | null>(null)
   const [items, setItems] = useState<ScanResultItem[]>([])
-  const [assignments, setAssignments] = useState<Record<number, Set<string>>>({})
+  const [prefillBill, setPrefillBill] = useState<Bill | null>(null)
 
 
   const generate = useCallback(async () => {
@@ -57,80 +74,52 @@ export default function QuickBillPage() {
       const currentDate = new Date().toISOString().slice(0, 10)
       const prompt = buildQuickBillPrompt(text, currentDate, memberNames)
 
-      // Call Edge Function (text-only, no image)
-      const res = await fetch(EDGE_FN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
-      })
+      const { result } = await scanReceipt([], prompt)
 
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({ error: `API 错误 ${res.status}` }))
-        throw new Error(e.error || `API 错误 ${res.status}`)
-      }
-
-      const data = await res.json()
-      let txt = (data.content || []).map((c: { text?: string }) => c.text || '').join('').trim()
-      txt = txt.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim()
-      const result: ScanResult = JSON.parse(txt)
 
       setResultData(result)
       const resultItems = result.items || []
       setItems(resultItems)
 
-      // Init assignments
-      const ids = selectedMembers.map(m => m.id)
-      const initAssign: Record<number, Set<string>> = {}
-      resultItems.forEach((_, idx) => { initAssign[idx] = new Set(ids) })
-      setAssignments(initAssign)
+      // Build a prefilled Bill for BillSheet
+      const billItems: BillItem[] = resultItems.map(item => ({
+        name: item.name,
+        price: Number(item.price),
+        qty: item.qty || 1,
+        members: [...selectedMembers],
+      }))
+      const totalAmount = billItems.reduce((s, i) => s + i.price * i.qty, 0)
+
+      setPrefillBill({
+        id: '',
+        icon: result.icon || '🧾',
+        title: result.title || '账单',
+        description: result.desc || '',
+        total_amount: totalAmount,
+        date: result.date || new Date().toISOString().slice(0, 10),
+        payer_id: user?.id || '',
+        payer_name: user?.user_metadata?.name || '',
+        payer_emoji: user?.user_metadata?.emoji || '😀',
+        payer_email: user?.email || '',
+        settled: false,
+        color: result.color || ICON_COLORS[result.icon || '🧾'] || 'linear-gradient(135deg,#8E8E93,#636366)',
+        items: billItems,
+        members: selectedMembers,
+        per_amount: totalAmount / (selectedMembers.length || 1),
+        my_share: totalAmount / (selectedMembers.length || 1),
+      })
 
       setStep('result')
     } catch (err) {
       setError((err as Error).message)
       setStep('input')
     }
-  }, [text, selectedMembers])
+  }, [text, selectedMembers, user])
 
-  const saveBill = useCallback(async () => {
-    if (!resultData || !user) return
-    setStep('saving')
-
-    try {
-      const isoDate = resultData.date || new Date().toISOString().slice(0, 10)
-
-      const billItems = items.map((item, idx) => {
-        const assignedSet = assignments[idx]
-        const memberIds = assignedSet && assignedSet.size > 0
-          ? [...assignedSet]
-          : [user.id]
-        return {
-          name: item.name,
-          price: Number(item.price),
-          qty: item.qty || 1,
-          member_ids: memberIds,
-        }
-      })
-
-      await createBill({
-        icon: resultData.icon || '🧾',
-        title: resultData.title || '账单',
-        description: resultData.desc || '',
-        date: isoDate,
-        color: resultData.color || ICON_COLORS[resultData.icon || '🧾'] || 'linear-gradient(135deg,#8E8E93,#636366)',
-        items: billItems,
-      })
-
-      toast.showToast('账单已保存')
-      setTimeout(() => navigate('/'), 800)
-    } catch (err) {
-      setError((err as Error).message)
-      setStep('result')
-    }
-  }, [resultData, items, assignments, user, navigate, toast])
-
-  const totalAmount = items.reduce((s, i) => s + i.price * (i.qty || 1), 0)
-  const memberCount = selectedMembers.length || 1
-  const perAmount = totalAmount / memberCount
+  const handleBillSaved = useCallback(() => {
+    toast.showToast('账单已保存')
+    setTimeout(() => navigate('/'), 800)
+  }, [navigate, toast])
 
   return (
     <div className="scanner-page">
@@ -161,38 +150,25 @@ export default function QuickBillPage() {
 
           {/* Member selection */}
           <div className="scanner-section-title" style={{ marginTop: 16 }}>参与成员</div>
-          <div className="scanner-member-list">
-            {allMembers.map(m => {
-              const isSel = selectedMembers.some(s => s.id === m.id)
-              return (
-                <button
-                  key={m.id}
-                  className={`scanner-member-bubble${isSel ? ' selected' : ''}`}
-                  onClick={() => {
-                    if (isSel && selectedMembers.length <= 1) return
-                    setSelectedMembers(prev =>
-                      prev.find(p => p.id === m.id)
-                        ? prev.filter(p => p.id !== m.id)
-                        : [...prev, m]
-                    )
-                  }}
-                >
-                  <div className="scanner-member-avatar" style={{ background: m.color || 'var(--bg3)' }}>
-                    {m.emoji || '😀'}
-                  </div>
-                  <div className="scanner-member-name">{m.name || '我'}</div>
-                </button>
-              )
-            })}
+          <div style={{ borderRadius: 16, overflow: 'hidden', border: '1px solid var(--sep)', background: 'var(--bg2)', marginTop: 8 }}>
+            <MemberPickerSheet
+              friends={friends}
+              groups={groups}
+              tags={tags}
+              selfMember={selfMember}
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              scrollMaxHeight="320px"
+            />
           </div>
 
           <button
             className="scanner-btn-primary"
             onClick={generate}
-            disabled={!text.trim()}
-            style={{ margin: '20px 0' }}
+            disabled={!text.trim() || selectedIds.length === 0}
+            style={{ width: '100%', margin: '20px 0 0' }}
           >
-            ✨ 生成账单
+            ✨ 生成账单 {selectedIds.length > 0 ? `(${selectedIds.length} 人)` : ''}
           </button>
         </div>
       )}
@@ -204,41 +180,16 @@ export default function QuickBillPage() {
         </div>
       )}
 
-      {step === 'result' && resultData && (
-        <>
-          <ScanResultView
-            icon={resultData.icon || '🧾'}
-            title={resultData.title || '账单'}
-            desc={resultData.desc || ''}
-            date={resultData.date || ''}
-            merchant={resultData.merchant || ''}
-            items={items}
-            totalAmount={totalAmount}
-            perAmount={perAmount}
-            onItemsChange={setItems}
-          />
-          <MemberAssignment
-            items={items}
-            members={selectedMembers}
-            assignments={assignments}
-            onAssignmentsChange={setAssignments}
-          />
-          <div style={{ display: 'flex', gap: 10, padding: '16px 20px' }}>
-            <button className="scanner-btn-secondary" onClick={() => setStep('input')} style={{ flex: 1 }}>
-              重新生成
-            </button>
-            <button className="scanner-btn-primary" onClick={saveBill} style={{ flex: 1 }}>
-              💾 保存账单
-            </button>
-          </div>
-        </>
-      )}
-
-      {step === 'saving' && (
-        <div className="scanner-loading">
-          <div className="scanner-spinner" />
-          <div>保存中...</div>
-        </div>
+      {/* Result: open BillSheet with pre-filled data for full member assignment */}
+      {step === 'result' && prefillBill && (
+        <BillSheet
+          bill={prefillBill}
+          friends={friends}
+          groups={groups}
+          tags={tags}
+          onClose={() => { setPrefillBill(null); setStep('input') }}
+          onSaved={handleBillSaved}
+        />
       )}
     </div>
   )

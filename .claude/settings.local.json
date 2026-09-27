@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//d/Documents/fenyixia/fenyixia/**)",
-      "Bash(npx tsc --noEmit)"
-    ]
-  }
-}

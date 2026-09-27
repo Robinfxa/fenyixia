@@ -110,6 +110,11 @@ export default function DisputeSheet({ bill, currentUserId, onClose, onSubmitted
               <div className="dispute-error">
                 {error}
                 <button onClick={() => setError('')}>✕</button>
+                {(error.includes('OpenAI') || error.includes('凭证') || error.includes('API error') || error.includes('429')) && (
+                  <div style={{ fontSize: 11, marginTop: 4, opacity: 0.85 }}>
+                    请联系管理员 (robinfxa@gmail.com) 检查 API 凭证配置
+                  </div>
+                )}
               </div>
             )}
 
