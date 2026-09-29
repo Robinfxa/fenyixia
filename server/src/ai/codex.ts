@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
+import { refreshCodexAccessToken } from './codexAuth.js';
 import { LunaMessage, LunaResponse, CallLunaOptions } from './openai.js';
 
 export function getCodexDir(): string {
@@ -34,21 +35,54 @@ export function isCodexCliAvailable(): boolean {
 export async function syncCodexAuthFromDb(): Promise<boolean> {
   try {
     const rows = await db.query<{ key: string; value: string }>(
-      "SELECT key, value FROM system_settings WHERE key IN ('openai_token', 'openai_refresh_token', 'openai_account_email', 'openai_auth_mode')"
+      "SELECT key, value FROM system_settings WHERE key IN ('openai_token', 'openai_refresh_token', 'openai_id_token', 'openai_account_email', 'openai_auth_mode')"
     );
     let token = '';
     let refreshToken = '';
+    let idToken = '';
     let email = '';
     let authMode = '';
     for (const r of rows) {
       if (r.key === 'openai_token') token = r.value;
       if (r.key === 'openai_refresh_token') refreshToken = r.value;
+      if (r.key === 'openai_id_token') idToken = r.value;
       if (r.key === 'openai_account_email') email = r.value;
       if (r.key === 'openai_auth_mode') authMode = r.value;
     }
 
     if (!token || authMode !== 'codex_oauth') {
       return false;
+    }
+
+    // If id_token is missing but we have a refresh_token, refresh to obtain id_token!
+    if (!idToken && refreshToken) {
+      try {
+        const refreshed = await refreshCodexAccessToken(refreshToken);
+        if (refreshed?.access_token) {
+          token = refreshed.access_token;
+          if (refreshed.id_token) idToken = refreshed.id_token;
+          if (refreshed.refresh_token) refreshToken = refreshed.refresh_token;
+
+          await db.run(
+            `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_token', ?, CURRENT_TIMESTAMP)`,
+            token
+          );
+          if (idToken) {
+            await db.run(
+              `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_id_token', ?, CURRENT_TIMESTAMP)`,
+              idToken
+            );
+          }
+          if (refreshToken) {
+            await db.run(
+              `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_refresh_token', ?, CURRENT_TIMESTAMP)`,
+              refreshToken
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('[Codex] Auto-refresh to fetch id_token failed:', e);
+      }
     }
 
     let accountId = '';
@@ -69,6 +103,7 @@ export async function syncCodexAuthFromDb(): Promise<boolean> {
       tokens: {
         access_token: token,
         account_id: accountId || undefined,
+        id_token: idToken || undefined,
         refresh_token: refreshToken || undefined,
       },
     };
@@ -90,33 +125,6 @@ export async function callCodex(
   options?: CallLunaOptions
 ): Promise<LunaResponse> {
   await syncCodexAuthFromDb();
-
-  // Validate that the authorized account has Codex subscription entitlement
-  const rows = await db.query<{ key: string; value: string }>(
-    "SELECT key, value FROM system_settings WHERE key IN ('openai_token', 'openai_account_email')"
-  );
-  let currentToken = '';
-  let accountEmail = '';
-  for (const r of rows) {
-    if (r.key === 'openai_token') currentToken = r.value;
-    if (r.key === 'openai_account_email') accountEmail = r.value;
-  }
-  if (currentToken) {
-    try {
-      const parts = currentToken.split('.');
-      if (parts[1]) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
-        const planType = payload['https://api.openai.com/auth']?.chatgpt_plan_type || '';
-        if (planType === 'free') {
-          throw new Error(
-            `当前授权的 ChatGPT 账号 (${accountEmail || '未识别邮箱'}) 为【免费版账号 (Free)】。OpenAI 规定 Codex 订阅额度仅对 ChatGPT Plus / Pro / Team 等付费订阅用户开放。请在管理面板使用具有 Plus 或 Pro 订阅的账号重新进行「Codex 设备代码授权」，或在 API Key 模式下配置第三方兼容 Base URL。`
-          );
-        }
-      }
-    } catch (e: any) {
-      if (e.message.includes('免费版账号')) throw e;
-    }
-  }
 
   const tempFiles: string[] = [];
   const imageFiles: string[] = [];

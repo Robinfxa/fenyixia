@@ -146,7 +146,7 @@ export async function pollCodexDeviceToken(
 
 export async function refreshCodexAccessToken(
   refreshToken: string
-): Promise<{ access_token: string; refresh_token?: string } | null> {
+): Promise<{ access_token: string; refresh_token?: string; id_token?: string } | null> {
   const params = new URLSearchParams({
     grant_type: 'refresh_token',
     client_id: CODEX_CLIENT_ID,
@@ -170,5 +170,6 @@ export async function refreshCodexAccessToken(
   return {
     access_token: data.access_token,
     refresh_token: data.refresh_token,
+    id_token: data.id_token,
   };
 }

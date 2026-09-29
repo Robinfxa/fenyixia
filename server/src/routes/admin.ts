@@ -185,7 +185,7 @@ adminRoute.post('/openai-config', async (c) => {
 // DELETE /api/admin/openai-config
 adminRoute.delete('/openai-config', async (c) => {
   await db.run(
-    "DELETE FROM system_settings WHERE key IN ('openai_token', 'openai_refresh_token', 'openai_auth_mode', 'openai_account_email', 'openai_model', 'openai_base_url')"
+    "DELETE FROM system_settings WHERE key IN ('openai_token', 'openai_refresh_token', 'openai_id_token', 'openai_auth_mode', 'openai_account_email', 'openai_model', 'openai_base_url')"
   );
   return c.json({ success: true, message: '系统 OpenAI 凭证已清除' });
 });
@@ -233,6 +233,14 @@ adminRoute.post('/codex/poll-token', async (c) => {
           `INSERT OR REPLACE INTO system_settings (key, value, updated_at)
            VALUES ('openai_refresh_token', ?, CURRENT_TIMESTAMP)`,
           pollResult.refresh_token
+        );
+      }
+
+      if (pollResult.id_token) {
+        await db.run(
+          `INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+           VALUES ('openai_id_token', ?, CURRENT_TIMESTAMP)`,
+          pollResult.id_token
         );
       }
 
