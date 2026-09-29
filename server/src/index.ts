@@ -16,6 +16,7 @@ import { aiRoute } from './routes/ai.js';
 import { adminRoute } from './routes/admin.js';
 import { tokensRoute } from './routes/tokens.js';
 import { summaryRoute, contactsRoute } from './routes/agent.js';
+import { syncCodexAuthFromDb } from './ai/codex.js';
 import { AppEnv } from './types.js';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -198,10 +199,12 @@ app.route('/api', aiRoute);
 
 const PORT = Number(process.env.PORT) || 3001;
 
-// Initialize Database on launch
-initDb().catch((err) => {
-  console.error('Database initialization failed:', err);
-});
+// Initialize Database on launch and sync Codex auth if configured
+initDb()
+  .then(() => syncCodexAuthFromDb())
+  .catch((err) => {
+    console.error('Database initialization failed:', err);
+  });
 
 console.log(`Server starting on port ${PORT}...`);
 

@@ -1,7 +1,9 @@
 import { db } from '../db/index.js';
+import { refreshCodexAccessToken } from './codexAuth.js';
+import { callCodex } from './codex.js';
 
 /**
- * OpenAI 5.6luna Client with OAuth Bearer Token Support
+ * OpenAI 5.6luna Client with Provider Routing (Codex CLI / HTTP API)
  */
 
 export interface LunaMessageContentPartText {
@@ -32,8 +34,6 @@ export interface LunaResponse {
   };
   model: string;
 }
-
-import { refreshCodexAccessToken } from './codexAuth.js';
 
 export function normalizeModelName(model?: string): string {
   if (!model) return 'gpt-5.6-luna';
@@ -73,7 +73,7 @@ export async function getSystemOpenAiConfig(): Promise<SystemOpenAiConfig> {
       if (r.key === 'openai_auth_mode') dbAuthMode = r.value;
       if (r.key === 'openai_account_email') dbEmail = r.value;
     }
-    if (dbToken) {
+    if (dbToken || dbAuthMode === 'codex_oauth') {
       return {
         token: dbToken,
         model: normalizeModelName(dbModel),
@@ -112,22 +112,19 @@ export interface CallLunaOptions {
   jsonMode?: boolean;
 }
 
-export async function callLuna(
+/**
+ * Standard HTTP call to OpenAI-compatible API endpoints
+ */
+export async function callOpenAiApi(
   messages: LunaMessage[],
-  customToken?: string,
-  customModel?: string,
+  token: string,
+  model: string,
+  baseUrl: string,
   options?: CallLunaOptions
 ): Promise<LunaResponse> {
-  const sysConfig = await getSystemOpenAiConfig();
-  const token = customToken || sysConfig.token;
-  const model = normalizeModelName(customModel || sysConfig.model);
-  const baseUrl = (sysConfig.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const cleanBaseUrl = (baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const endpoint = `${cleanBaseUrl}/chat/completions`;
 
-  if (!token) {
-    throw new Error('未配置 OpenAI 5.6luna 会话凭证或 API Key。请管理员在「管理面板 (/admin)」中配置。');
-  }
-
-  const endpoint = `${baseUrl}/chat/completions`;
   const requestBody: any = {
     model,
     messages,
@@ -139,7 +136,6 @@ export async function callLuna(
     requestBody.response_format = { type: 'json_object' };
   }
 
-  // Real OpenAI call with OAuth bearer token or API key
   let activeToken = token;
   let res = await fetch(endpoint, {
     method: 'POST',
@@ -150,8 +146,8 @@ export async function callLuna(
     body: JSON.stringify(requestBody),
   });
 
-  // If 401 Unauthorized and we are using system db settings with codex oauth, attempt refresh
-  if (res.status === 401 && !customToken && sysConfig.source === 'db') {
+  // If 401 Unauthorized and we have a refresh token in DB, attempt refresh
+  if (res.status === 401) {
     try {
       const refreshRow = await db.queryOne<{ value: string }>(
         "SELECT value FROM system_settings WHERE key = 'openai_refresh_token'"
@@ -172,7 +168,6 @@ export async function callLuna(
               refreshed.refresh_token
             );
           }
-          // Retry OpenAI API call with new token
           res = await fetch(endpoint, {
             method: 'POST',
             headers: {
@@ -190,7 +185,12 @@ export async function callLuna(
 
   if (!res.ok) {
     const errorBody = await res.text();
-    throw new Error(`OpenAI 5.6luna API error (${res.status}): ${errorBody}`);
+    if (res.status === 429 && errorBody.includes('billing_not_active')) {
+      throw new Error(
+        'OpenAI 账户未在 platform.openai.com 充值激活 (billing_not_active)。若要使用 ChatGPT 订阅额度，请在管理面板使用「Codex 设备代码授权」；若使用 API Key，请先预充值或配置第三方兼容 Base URL。'
+      );
+    }
+    throw new Error(`OpenAI 兼容 API 错误 (${res.status}): ${errorBody}`);
   }
 
   const data = await res.json();
@@ -206,4 +206,29 @@ export async function callLuna(
     },
     model: data.model || model,
   };
+}
+
+/**
+ * Main AI dispatcher: automatically routes between Codex CLI (ChatGPT subscription) and OpenAI HTTP API
+ */
+export async function callLuna(
+  messages: LunaMessage[],
+  customToken?: string,
+  customModel?: string,
+  options?: CallLunaOptions
+): Promise<LunaResponse> {
+  const sysConfig = await getSystemOpenAiConfig();
+  const token = customToken || sysConfig.token;
+  const model = normalizeModelName(customModel || sysConfig.model);
+
+  // If system is configured with ChatGPT Codex OAuth and no explicit custom token was passed
+  if (sysConfig.authMode === 'codex_oauth' && !customToken) {
+    return await callCodex(messages, model, options);
+  }
+
+  if (!token) {
+    throw new Error('未配置 OpenAI 5.6luna 凭证。请管理员在「管理面板 (/admin)」中配置或进行 Codex 授权。');
+  }
+
+  return await callOpenAiApi(messages, token, model, sysConfig.baseUrl, options);
 }

@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { db } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { getSystemOpenAiConfig, normalizeModelName } from '../ai/openai.js';
+import { getSystemOpenAiConfig, normalizeModelName, callOpenAiApi } from '../ai/openai.js';
 import { requestCodexDeviceCode, pollCodexDeviceToken } from '../ai/codexAuth.js';
+import { syncCodexAuthFromDb, callCodex } from '../ai/codex.js';
 import { AppEnv } from '../types.js';
 
 export const ADMIN_EMAIL = 'robinfxa@gmail.com';
@@ -259,6 +260,9 @@ adminRoute.post('/codex/poll-token', async (c) => {
         );
       }
 
+      // Sync auth.json so Codex CLI runtime is immediately logged in
+      await syncCodexAuthFromDb();
+
       return c.json({
         status: 'success',
         email: pollResult.email,
@@ -279,46 +283,35 @@ adminRoute.post('/openai-test', async (c) => {
   const token = body.token?.trim() || sysConfig.token;
   const model = normalizeModelName(body.model?.trim() || sysConfig.model);
   const baseUrl = (body.base_url?.trim() || sysConfig.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-
-  if (!token) {
-    return c.json({ error: '未提供或未配置 Token' }, 400);
-  }
+  const authMode = body.auth_mode || (body.token ? 'api_key' : sysConfig.authMode);
 
   try {
-    const res = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_completion_tokens: 10,
-        max_tokens: 10,
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
+    if (authMode === 'codex_oauth' && !body.token) {
+      await syncCodexAuthFromDb();
+      const res = await callCodex([{ role: 'user', content: 'Say "OK"' }], model);
       return c.json({
-        success: false,
-        message: `OpenAI 鉴权或服务错误 (${res.status}): ${errText}`,
-      }, 400);
+        success: true,
+        message: `Codex 订阅运行时连接成功！模型: ${res.model}，响应: ${res.content.slice(0, 100)}`,
+        model: res.model,
+      });
     }
 
-    const data = await res.json();
+    if (!token) {
+      return c.json({ error: '未提供或未配置 Token' }, 400);
+    }
+
+    const res = await callOpenAiApi([{ role: 'user', content: 'Say "OK"' }], token, model, baseUrl);
     return c.json({
       success: true,
-      message: `连接成功！端点: ${baseUrl}，模型: ${model}，响应: ${data.choices?.[0]?.message?.content?.trim() || 'OK'}`,
+      message: `OpenAI 兼容接口连接成功！端点: ${baseUrl}，模型: ${model}，响应: ${res.content.slice(0, 100)}`,
       model,
       base_url: baseUrl,
     });
   } catch (err: any) {
     return c.json({
       success: false,
-      message: `请求失败: ${err.message}`,
-    }, 500);
+      message: `测试连接失败: ${err.message}`,
+    }, 400);
   }
 });
 
