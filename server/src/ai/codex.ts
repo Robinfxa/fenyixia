@@ -91,6 +91,33 @@ export async function callCodex(
 ): Promise<LunaResponse> {
   await syncCodexAuthFromDb();
 
+  // Validate that the authorized account has Codex subscription entitlement
+  const rows = await db.query<{ key: string; value: string }>(
+    "SELECT key, value FROM system_settings WHERE key IN ('openai_token', 'openai_account_email')"
+  );
+  let currentToken = '';
+  let accountEmail = '';
+  for (const r of rows) {
+    if (r.key === 'openai_token') currentToken = r.value;
+    if (r.key === 'openai_account_email') accountEmail = r.value;
+  }
+  if (currentToken) {
+    try {
+      const parts = currentToken.split('.');
+      if (parts[1]) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+        const planType = payload['https://api.openai.com/auth']?.chatgpt_plan_type || '';
+        if (planType === 'free') {
+          throw new Error(
+            `当前授权的 ChatGPT 账号 (${accountEmail || '未识别邮箱'}) 为【免费版账号 (Free)】。OpenAI 规定 Codex 订阅额度仅对 ChatGPT Plus / Pro / Team 等付费订阅用户开放。请在管理面板使用具有 Plus 或 Pro 订阅的账号重新进行「Codex 设备代码授权」，或在 API Key 模式下配置第三方兼容 Base URL。`
+          );
+        }
+      }
+    } catch (e: any) {
+      if (e.message.includes('免费版账号')) throw e;
+    }
+  }
+
   const tempFiles: string[] = [];
   const imageFiles: string[] = [];
   let promptText = '';
@@ -137,8 +164,6 @@ export async function callCodex(
     '--ignore-rules',
     '-s',
     'read-only',
-    '-a',
-    'never',
     '-m',
     targetModel,
     '-o',
