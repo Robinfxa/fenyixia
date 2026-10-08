@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { FriendLedgerStat } from '../../hooks/useBillStats'
 import { fmtMoney } from '../../lib/utils'
 
@@ -7,18 +8,44 @@ interface SocialAALedgerProps {
 }
 
 export default function SocialAALedger({ friends }: SocialAALedgerProps) {
+  const navigate = useNavigate()
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (friends.length === 0) {
     return (
-      <div style={{
-        padding: '30px 16px',
-        textAlign: 'center',
-        color: 'var(--label3)',
-        fontSize: 13,
-      }}>
-        <div style={{ fontSize: 28, marginBottom: 6 }}>👥</div>
-        <div>当期没有与其他好友的多人分账记录</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div
+          onClick={() => navigate('/settlements')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px',
+            borderRadius: 12,
+            background: 'linear-gradient(135deg, rgba(10,132,255,0.12), rgba(99,102,241,0.08))',
+            border: '1px solid rgba(10,132,255,0.25)',
+            cursor: 'pointer',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 18 }}>🗓️</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--blue)' }}>每周清账中心</div>
+              <div style={{ fontSize: 11, color: 'var(--label2)' }}>每周轧差结算，逾期自动顺延</div>
+            </div>
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue)' }}>前往 ›</span>
+        </div>
+
+        <div style={{
+          padding: '24px 16px',
+          textAlign: 'center',
+          color: 'var(--label3)',
+          fontSize: 13,
+        }}>
+          <div style={{ fontSize: 28, marginBottom: 6 }}>👥</div>
+          <div>当期没有与其他好友的多人分账记录</div>
+        </div>
       </div>
     )
   }
@@ -30,6 +57,29 @@ export default function SocialAALedger({ friends }: SocialAALedgerProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Weekly Settlement Shortcut Banner */}
+      <div
+        onClick={() => navigate('/settlements')}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 14px',
+          borderRadius: 12,
+          background: 'linear-gradient(135deg, rgba(10,132,255,0.12), rgba(99,102,241,0.08))',
+          border: '1px solid rgba(10,132,255,0.25)',
+          cursor: 'pointer',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 18 }}>🗓️</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--blue)' }}>每周清账中心</div>
+            <div style={{ fontSize: 11, color: 'var(--label2)' }}>按周与好友轧差清账，逾期自动顺延</div>
+          </div>
+        </div>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--blue)' }}>去清账 ›</span>
+      </div>
       {/* Mini Summary Strip */}
       <div style={{
         display: 'flex',
@@ -244,6 +294,30 @@ export default function SocialAALedger({ friends }: SocialAALedgerProps) {
                     </div>
                   ))}
                 </div>
+
+                {friend.netBalance !== 0 && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate('/settlements')
+                    }}
+                    style={{
+                      marginTop: 10,
+                      width: '100%',
+                      padding: '8px 0',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: 'var(--blue)',
+                      color: '#fff',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    前往每周清账，一键结算此好友账目
+                  </button>
+                )}
               </div>
             )}
           </div>

@@ -15,6 +15,7 @@ import StatsPage from './pages/StatsPage'
 import ScanPage from './pages/ScanPage'
 import QuickBillPage from './pages/QuickBillPage'
 import AdminPage from './pages/AdminPage'
+import SettlementsPage from './pages/SettlementsPage'
 import AddBillOverlay from './components/AddBillOverlay/AddBillOverlay'
 import DebugConsole from './components/Debug/DebugConsole'
 
@@ -86,6 +87,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <StatsPage onAddClick={handleAddClick} />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settlements"
+          element={
+            <ProtectedRoute>
+              <SettlementsPage onAddClick={handleAddClick} />
             </ProtectedRoute>
           }
         />

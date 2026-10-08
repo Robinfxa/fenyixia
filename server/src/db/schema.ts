@@ -197,6 +197,20 @@ CREATE TABLE IF NOT EXISTS system_settings (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 20. Weekly Settlement Cycles
+CREATE TABLE IF NOT EXISTS settlement_cycles (
+  id VARCHAR PRIMARY KEY,
+  user_id VARCHAR NOT NULL,
+  friend_id VARCHAR NOT NULL,
+  cycle_start VARCHAR NOT NULL,
+  cycle_end VARCHAR NOT NULL,
+  status VARCHAR NOT NULL DEFAULT 'pending',
+  net_amount DECIMAL(10,2) DEFAULT 0.00,
+  settled_bill_ids VARCHAR DEFAULT '[]',
+  confirmed_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_bills_payer ON bills(payer_id);
 CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date);
@@ -207,4 +221,5 @@ CREATE INDEX IF NOT EXISTS idx_friendships_b ON friendships(user_b);
 CREATE INDEX IF NOT EXISTS idx_payment_proofs_bill ON payment_proofs(bill_id);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_bill ON manual_payments(bill_id);
 CREATE INDEX IF NOT EXISTS idx_bill_disputes_bill ON bill_disputes(bill_id);
+CREATE INDEX IF NOT EXISTS idx_settlement_cycles_user_friend ON settlement_cycles(user_id, friend_id);
 `;
