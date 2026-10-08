@@ -17,6 +17,10 @@ adminRoute.use('*', async (c, next) => {
   if (!user || user.email !== ADMIN_EMAIL) {
     return c.json({ error: `未授权：仅管理员 ${ADMIN_EMAIL} 可访问控制台` }, 403);
   }
+  // API tokens cannot access admin endpoints — require interactive session
+  if (c.get('authKind') === 'api_token') {
+    return c.json({ error: '管理接口不允许使用 API Token 访问，请使用浏览器登录' }, 403);
+  }
   await next();
 });
 

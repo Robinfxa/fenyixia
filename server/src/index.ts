@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { initDb, closeDb } from './db/index.js';
+import { db } from './db/index.js';
 import { uploadRoute, UPLOADS_DIR } from './routes/upload.js';
 import { authRoute } from './routes/auth.js';
 import { billsRoute } from './routes/bills.js';
@@ -44,8 +45,39 @@ app.use('*', cors({
   credentials: true,
 }));
 
-// Static files serving for /uploads/*
+// Static files serving for /uploads/* — requires authentication
 app.get('/uploads/*', async (c) => {
+  // Verify authentication before serving files
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Also check for token in query param (for img src tags)
+    const tokenParam = c.req.query('token');
+    if (!tokenParam) {
+      return c.text('Unauthorized', 401);
+    }
+    // Minimal token verification via import
+    const { verifyToken } = await import('./middleware/auth.js');
+    const decoded = await verifyToken(tokenParam);
+    if (!decoded) {
+      return c.text('Unauthorized', 401);
+    }
+  } else {
+    const token = authHeader.substring(7).trim();
+    const { verifyToken } = await import('./middleware/auth.js');
+    // Check JWT first
+    const decoded = await verifyToken(token);
+    if (!decoded) {
+      // Check api_tokens table
+      const apiTokenRow = await db.queryOne<{ user_id: string }>(
+        'SELECT user_id FROM api_tokens WHERE token = ?',
+        token
+      );
+      if (!apiTokenRow) {
+        return c.text('Unauthorized', 401);
+      }
+    }
+  }
+
   const relPath = c.req.path.replace(/^\/uploads\//, '');
   const resolvedRoot = path.resolve(UPLOADS_DIR);
   const fullPath = path.resolve(resolvedRoot, path.normalize(relPath));
@@ -83,7 +115,7 @@ app.get('/uploads/*', async (c) => {
   return c.body(fileStream as any, 200, {
     'Content-Type': contentType,
     'Content-Length': stat.size.toString(),
-    'Cache-Control': 'public, max-age=31536000, immutable',
+    'Cache-Control': 'private, max-age=3600',
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
   });

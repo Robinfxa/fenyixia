@@ -97,14 +97,15 @@ disputesRoute.post('/:id/resolve', async (c) => {
   const user = c.get('user');
   const disputeId = c.req.param('id');
   const body = await c.req.json();
-  const { bill_id, accepted, suggested_items, bill_title, bill_icon } = body;
+  const { accepted, suggested_items, bill_title, bill_icon } = body;
 
   const dispute = await db.queryOne<{ bill_id: string }>('SELECT bill_id FROM bill_disputes WHERE id = ?', disputeId);
   if (!dispute) {
     return c.json({ error: 'Dispute not found' }, 404);
   }
 
-  const targetBillId = dispute.bill_id || bill_id;
+  // Always use the bill_id from the dispute record, never trust request body
+  const targetBillId = dispute.bill_id;
   const bill = await db.queryOne<{ payer_id: string }>('SELECT payer_id FROM bills WHERE id = ?', targetBillId);
   if (!bill) {
     return c.json({ error: 'Bill not found' }, 404);
@@ -126,22 +127,22 @@ disputesRoute.post('/:id/resolve', async (c) => {
       const items = suggested_items;
       const totalAmount = items.reduce((s: number, i: any) => s + (Number(i.price) || 0) * (Number(i.qty) || 1), 0);
 
-      // Update bill
+      // Update bill — always use targetBillId from dispute
       if (bill_title || bill_icon) {
         await tx.run(
           'UPDATE bills SET title = COALESCE(?, title), icon = COALESCE(?, icon), total_amount = ? WHERE id = ?',
-          bill_title, bill_icon, totalAmount, bill_id
+          bill_title, bill_icon, totalAmount, targetBillId
         );
       } else {
-        await tx.run('UPDATE bills SET total_amount = ? WHERE id = ?', totalAmount, bill_id);
+        await tx.run('UPDATE bills SET total_amount = ? WHERE id = ?', totalAmount, targetBillId);
       }
 
       // Delete old items
-      const oldItems = await tx.query<any>('SELECT id FROM bill_items WHERE bill_id = ?', bill_id);
+      const oldItems = await tx.query<any>('SELECT id FROM bill_items WHERE bill_id = ?', targetBillId);
       for (const oi of oldItems) {
         await tx.run('DELETE FROM bill_item_members WHERE item_id = ?', oi.id);
       }
-      await tx.run('DELETE FROM bill_items WHERE bill_id = ?', bill_id);
+      await tx.run('DELETE FROM bill_items WHERE bill_id = ?', targetBillId);
 
       // Insert new items
       for (let i = 0; i < items.length; i++) {
@@ -149,7 +150,7 @@ disputesRoute.post('/:id/resolve', async (c) => {
         const itemId = crypto.randomUUID();
         await tx.run(
           'INSERT INTO bill_items (id, bill_id, name, price, qty, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
-          itemId, bill_id, item.name, item.price, item.qty || 1, i
+          itemId, targetBillId, item.name, item.price, item.qty || 1, i
         );
 
         const memberIds: string[] = item.member_ids || [];

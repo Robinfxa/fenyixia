@@ -202,7 +202,7 @@ groupsRoute.delete('/:id/members/:userId', async (c) => {
   return c.json({ success: true });
 });
 
-// PUT /api/groups/:id/members - Set all members
+// PUT /api/groups/:id/members - Set all members (owner only)
 groupsRoute.put('/:id/members', async (c) => {
   const user = c.get('user');
   const groupId = c.req.param('id');
@@ -214,15 +214,17 @@ groupsRoute.put('/:id/members', async (c) => {
     return c.json({ error: 'Group not found' }, 404);
   }
 
-  const isMember = await db.queryOne(
-    'SELECT group_id FROM group_members WHERE group_id = ? AND user_id = ?',
+  // Only the group owner/creator can replace the full member list
+  const isOwner = group.created_by === user.id || await db.queryOne(
+    "SELECT group_id FROM group_members WHERE group_id = ? AND user_id = ? AND role = 'owner'",
     groupId, user.id
   );
-  if (!isMember && group.created_by !== user.id) {
-    return c.json({ error: '无权编辑群组成员' }, 403);
+  if (!isOwner) {
+    return c.json({ error: '只有群主可以设置群组成员' }, 403);
   }
 
-  const allIds = [...new Set([user.id, ...userIds])];
+  // Owner must always remain in the list
+  const allIds = [...new Set([group.created_by, ...userIds])];
 
   await db.transaction(async (tx) => {
     await tx.run('DELETE FROM group_members WHERE group_id = ?', groupId);
@@ -231,7 +233,7 @@ groupsRoute.put('/:id/members', async (c) => {
         'INSERT INTO group_members (group_id, user_id, role) VALUES (?, ?, ?)',
         groupId,
         uid,
-        uid === user.id ? 'owner' : 'member'
+        uid === group.created_by ? 'owner' : 'member'
       );
     }
   });

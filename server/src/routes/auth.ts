@@ -47,13 +47,17 @@ authRoute.post('/signup', async (c) => {
       return c.json({ error: 'Email is required' }, 400);
     }
 
+    if (!pin || String(pin).trim().length < 6) {
+      return c.json({ error: 'PIN 码为必填项，且长度至少为 6 位' }, 400);
+    }
+
     const existing = await db.queryOne('SELECT id FROM users WHERE email = ?', email);
     if (existing) {
       return c.json({ error: '用户已存在，请直接登录' }, 400);
     }
 
     const userId = crypto.randomUUID();
-    const pinHash = pin ? hashSecret(String(pin)) : null;
+    const pinHash = hashSecret(String(pin).trim());
 
     await db.run(
       `INSERT INTO users (id, name, email, emoji, color, pin_hash, password_hash, profile_completed)
@@ -290,10 +294,10 @@ authRoute.get('/check-profile/:id', async (c) => {
   });
 });
 
-// Get user profile by id
+// Get user profile by id (public info only — no email)
 authRoute.get('/user/:id', async (c) => {
   const id = c.req.param('id');
-  const user = await db.queryOne('SELECT id, name, emoji, color, email, avatar_url FROM users WHERE id = ?', id);
+  const user = await db.queryOne('SELECT id, name, emoji, color, avatar_url FROM users WHERE id = ?', id);
   if (!user) return c.json({ user: null });
   return c.json({ user });
 });

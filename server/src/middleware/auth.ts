@@ -7,10 +7,12 @@ function getJwtSecret(): Uint8Array {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     if (process.env.NODE_ENV === 'production') {
-      console.warn('⚠️ WARNING: JWT_SECRET not found in production! Using ephemeral random secret for security.');
-      return new TextEncoder().encode(crypto.randomBytes(48).toString('hex'));
+      console.error('🚨 FATAL: JWT_SECRET environment variable is required in production!');
+      console.error('   Generate one with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'hex\'))"');
+      process.exit(1);
     }
-    return new TextEncoder().encode('fenyixia-duckdb-secret-key-32bytes-long-min!');
+    console.warn('⚠️ Using development-only JWT secret. Do NOT use in production.');
+    return new TextEncoder().encode('fenyixia-dev-only-secret-key-not-for-prod!');
   }
   return new TextEncoder().encode(secret);
 }
@@ -73,6 +75,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
         db.run('UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token = ?', token).catch(() => {});
         c.set('user', user);
         c.set('userId', user.id);
+        c.set('authKind', 'api_token');
         return next();
       }
     }
@@ -92,6 +95,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
         db.run('UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE token = ?', token).catch(() => {});
         c.set('user', user);
         c.set('userId', user.id);
+        c.set('authKind', 'api_token');
         return next();
       }
     }
@@ -105,6 +109,7 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next) {
 
   c.set('user', user);
   c.set('userId', user.id);
+  c.set('authKind', 'session');
   await next();
 }
 
