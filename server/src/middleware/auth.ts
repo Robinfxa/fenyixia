@@ -1,9 +1,12 @@
+import '../env.js';
 import { Context, Next } from 'hono';
 import * as jose from 'jose';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
 
-function getJwtSecret(): Uint8Array {
+let cachedJwtSecret: Uint8Array | null = null;
+export function getJwtSecret(): Uint8Array {
+  if (cachedJwtSecret) return cachedJwtSecret;
   const secret = process.env.JWT_SECRET;
   if (!secret) {
     if (process.env.NODE_ENV === 'production') {
@@ -12,12 +15,12 @@ function getJwtSecret(): Uint8Array {
       process.exit(1);
     }
     console.warn('⚠️ Using development-only JWT secret. Do NOT use in production.');
-    return new TextEncoder().encode('fenyixia-dev-only-secret-key-not-for-prod!');
+    cachedJwtSecret = new TextEncoder().encode('fenyixia-dev-only-secret-key-not-for-prod!');
+    return cachedJwtSecret;
   }
-  return new TextEncoder().encode(secret);
+  cachedJwtSecret = new TextEncoder().encode(secret);
+  return cachedJwtSecret;
 }
-
-const JWT_SECRET = getJwtSecret();
 
 export function hashSecret(secret: string): string {
   return crypto.pbkdf2Sync(secret, 'fenyixia_salt_secure', 10000, 32, 'sha256').toString('hex');
@@ -37,12 +40,12 @@ export async function signToken(payload: { userId: string; email: string }): Pro
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('30d')
-    .sign(JWT_SECRET);
+    .sign(getJwtSecret());
 }
 
 export async function verifyToken(token: string): Promise<{ userId: string; email: string } | null> {
   try {
-    const { payload } = await jose.jwtVerify(token, JWT_SECRET);
+    const { payload } = await jose.jwtVerify(token, getJwtSecret());
     return {
       userId: payload.userId as string,
       email: payload.email as string,

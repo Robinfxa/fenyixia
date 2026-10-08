@@ -1,3 +1,4 @@
+import './env.js';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
@@ -22,17 +23,6 @@ import { syncCodexAuthFromDb } from './ai/codex.js';
 import { AppEnv } from './types.js';
 import path from 'node:path';
 import fs from 'node:fs';
-
-// Try loading environment variables from .env files
-try {
-  process.loadEnvFile();
-} catch {}
-try {
-  process.loadEnvFile(path.resolve(process.cwd(), '../.env'));
-} catch {}
-try {
-  process.loadEnvFile(path.resolve(process.cwd(), '.env'));
-} catch {}
 
 const app = new Hono<AppEnv>();
 

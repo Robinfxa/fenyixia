@@ -1,3 +1,4 @@
+import '../env.js';
 import duckdb from 'duckdb';
 import fs from 'node:fs';
 import path from 'node:path';
