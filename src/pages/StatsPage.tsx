@@ -51,17 +51,17 @@ export default function StatsPage({ onAddClick }: { onAddClick?: () => void }) {
             <span>统计透视</span>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {stats.totalBillsCount > 0 && (
             <button
               type="button"
-              onClick={() => navigate('/settlements')}
+              onClick={() => setShowRecapModal(true)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 5,
                 padding: '6px 12px',
                 borderRadius: 14,
-                background: 'linear-gradient(135deg, rgba(10,132,255,0.14), rgba(99,102,241,0.1))',
+                background: 'rgba(10, 132, 255, 0.14)',
                 border: '1px solid rgba(10, 132, 255, 0.3)',
                 color: 'var(--blue)',
                 fontSize: 12,
@@ -70,34 +70,10 @@ export default function StatsPage({ onAddClick }: { onAddClick?: () => void }) {
                 fontFamily: 'inherit',
               }}
             >
-              <span>🗓️</span>
-              <span>每周清账</span>
+              <span>✨</span>
+              <span>聚会手帐</span>
             </button>
-
-            {stats.totalBillsCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowRecapModal(true)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '6px 12px',
-                  borderRadius: 14,
-                  background: 'rgba(10, 132, 255, 0.14)',
-                  border: '1px solid rgba(10, 132, 255, 0.3)',
-                  color: 'var(--blue)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: 'inherit',
-                }}
-              >
-                <span>✨</span>
-                <span>聚会手帐</span>
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 

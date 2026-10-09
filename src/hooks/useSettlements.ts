@@ -13,8 +13,8 @@ export function useSettlements() {
     { revalidateOnFocus: true }
   );
 
-  const confirmCycle = async (cycleId: string) => {
-    const res = await confirmSettlement(cycleId);
+  const confirmCycle = async (cycleId: string, proofImageUrl: string, proofNote?: string) => {
+    const res = await confirmSettlement(cycleId, proofImageUrl, proofNote);
     await revalidate();
     await mutateBills();
     return res;

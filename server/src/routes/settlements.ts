@@ -40,7 +40,7 @@ export function getWeekBounds(targetDate = new Date()) {
 export async function computePairwiseDebt(userAId: string, userBId: string) {
   // Query all unsettled bills where either userA or userB is the payer
   const candidateBills = await db.query<any>(
-    `SELECT b.id, b.title, b.icon, b.total_amount, b.date, b.payer_id, b.settled
+    `SELECT b.id, b.title, b.icon, b.description, b.color, b.total_amount, b.date, b.payer_id, b.settled
      FROM bills b
      WHERE b.settled = false
        AND (b.payer_id = ? OR b.payer_id = ?)
@@ -140,10 +140,17 @@ export async function computePairwiseDebt(userAId: string, userBId: string) {
     }
 
     if (isBillRelevant) {
+      const disputes = await db.query<any>(
+        `SELECT id, bill_id, user_id, reason, status FROM bill_disputes WHERE bill_id = ? AND status = 'pending'`,
+        bill.id
+      );
+
       involvedBills.push({
         id: bill.id,
         title: bill.title,
-        icon: bill.icon,
+        icon: bill.icon || '🧾',
+        color: bill.color || '#4F46E5',
+        description: bill.description || '',
         total_amount: Number(bill.total_amount),
         date: bill.date,
         payer_id: bill.payer_id,
@@ -151,6 +158,8 @@ export async function computePairwiseDebt(userAId: string, userBId: string) {
         their_share: bShare,
         pending_amount: pendingFromThisBill,
         i_am_payer: isUserAPayer,
+        has_dispute: disputes.length > 0,
+        dispute: disputes[0] || null,
       });
     }
   }
@@ -286,6 +295,9 @@ settlementsRoute.get('/', async (c) => {
       status: c.status, // 'pending' | 'overdue' | 'confirmed'
       net_amount: Math.round(adjustedNetAmount * 100) / 100,
       bill_count: billIds.length,
+      proof_image_url: c.proof_image_url || null,
+      proof_note: c.proof_note || null,
+      confirmed_by: c.confirmed_by || null,
       confirmed_at: c.confirmed_at,
       created_at: c.created_at,
     };
@@ -331,6 +343,14 @@ settlementsRoute.get('/preview/:friendId', async (c) => {
 settlementsRoute.post('/:id/confirm', async (c) => {
   const user = c.get('user');
   const cycleId = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+
+  const proofImageUrl = body.proof_image_url || body.proofImageUrl;
+  const proofNote = body.proof_note || body.proofNote || '';
+
+  if (!proofImageUrl || typeof proofImageUrl !== 'string' || !proofImageUrl.trim()) {
+    return c.json({ error: '必须上传付款凭证截图方可确认结清' }, 400);
+  }
 
   const cycle = await db.queryOne<any>(
     'SELECT * FROM settlement_cycles WHERE id = ?',
@@ -388,6 +408,19 @@ settlementsRoute.post('/:id/confirm', async (c) => {
         }
       }
 
+      // Record payment proof on this bill so both sides can see the screenshot in bill details
+      const hasProof = await tx.queryOne(
+        'SELECT id FROM payment_proofs WHERE bill_id = ? AND user_id = ?',
+        billId, user.id
+      );
+      if (!hasProof) {
+        await tx.run(
+          `INSERT INTO payment_proofs (id, bill_id, user_id, image_url, note)
+           VALUES (?, ?, ?, ?, ?)`,
+          crypto.randomUUID(), billId, user.id, proofImageUrl.trim(), proofNote.trim() || '每周清账付款凭证'
+        );
+      }
+
       // Check if all non-payer members of this bill are now settled
       const distinctMembers = await tx.query<any>(
         `SELECT DISTINCT user_id FROM bill_item_members
@@ -416,14 +449,20 @@ settlementsRoute.post('/:id/confirm', async (c) => {
       }
     }
 
-    // Mark cycle as confirmed
+    // Mark cycle as confirmed with proof and confirmed_by
     await tx.run(
       `UPDATE settlement_cycles
        SET status = 'confirmed',
            confirmed_at = CURRENT_TIMESTAMP,
+           confirmed_by = ?,
+           proof_image_url = ?,
+           proof_note = ?,
            net_amount = ?,
            settled_bill_ids = ?
        WHERE id = ?`,
+      user.id,
+      proofImageUrl.trim(),
+      proofNote.trim(),
       cycle.user_id === user.id ? latestDebt.netAmount : -latestDebt.netAmount,
       JSON.stringify(billsToClear.map((b) => b.id)),
       cycleId
@@ -432,8 +471,9 @@ settlementsRoute.post('/:id/confirm', async (c) => {
 
   return c.json({
     success: true,
-    message: '清帐成功，账目已同步更新',
+    message: '清帐成功，付款凭证已归档，账目已同步更新',
     cleared_bills_count: billsToClear.length,
+    proof_image_url: proofImageUrl.trim(),
   });
 });
 

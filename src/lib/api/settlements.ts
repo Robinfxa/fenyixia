@@ -15,6 +15,9 @@ export interface SettlementCycle {
   status: 'pending' | 'overdue' | 'confirmed';
   net_amount: number; // positive: they owe me, negative: I owe them
   bill_count: number;
+  proof_image_url?: string | null;
+  proof_note?: string | null;
+  confirmed_by?: string | null;
   confirmed_at?: string | null;
   created_at: string;
 }
@@ -23,6 +26,8 @@ export interface SettlementPreviewBill {
   id: string;
   title: string;
   icon: string;
+  color?: string;
+  description?: string;
   total_amount: number;
   date: string;
   payer_id: string;
@@ -30,6 +35,8 @@ export interface SettlementPreviewBill {
   their_share: number;
   pending_amount: number;
   i_am_payer: boolean;
+  has_dispute?: boolean;
+  dispute?: any | null;
 }
 
 export interface SettlementPreviewData {
@@ -63,8 +70,22 @@ export async function fetchSettlementPreview(friendId: string): Promise<Settleme
   return res;
 }
 
-export async function confirmSettlement(cycleId: string): Promise<{ success: boolean; cleared_bills_count: number }> {
-  return await api.post(`/api/settlements/${cycleId}/confirm`, {});
+export async function uploadProofImage(file: File): Promise<{ url: string; filename: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await api.post<{ success: boolean; url: string; filename: string }>('/api/upload/proof', formData);
+  return res;
+}
+
+export async function confirmSettlement(
+  cycleId: string,
+  proofImageUrl: string,
+  proofNote?: string
+): Promise<{ success: boolean; cleared_bills_count: number; proof_image_url: string }> {
+  return await api.post(`/api/settlements/${cycleId}/confirm`, {
+    proof_image_url: proofImageUrl,
+    proof_note: proofNote || '',
+  });
 }
 
 export async function skipSettlement(cycleId: string): Promise<{ success: boolean }> {

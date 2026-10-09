@@ -205,6 +205,25 @@ export async function initDb(dbFilePath?: string): Promise<void> {
     console.warn('api_tokens column check/alter skipped:', err);
   }
 
+  // Schema migration for settlement_cycles: ensure proof columns exist
+  try {
+    const scCols = await query<{ name: string }>("PRAGMA table_info('settlement_cycles')");
+    if (scCols.length > 0) {
+      if (!scCols.some((c) => c.name === 'proof_image_url')) {
+        await run('ALTER TABLE settlement_cycles ADD COLUMN proof_image_url VARCHAR');
+      }
+      if (!scCols.some((c) => c.name === 'proof_note')) {
+        await run('ALTER TABLE settlement_cycles ADD COLUMN proof_note VARCHAR');
+      }
+      if (!scCols.some((c) => c.name === 'confirmed_by')) {
+        await run('ALTER TABLE settlement_cycles ADD COLUMN confirmed_by VARCHAR');
+      }
+      await run('CHECKPOINT;');
+    }
+  } catch (err) {
+    console.warn('settlement_cycles column check/alter skipped:', err);
+  }
+
   // Seed default admin user ONLY if not already present — never overwrite existing credentials
   const adminEmail = process.env.ADMIN_EMAIL || 'robinfxa@gmail.com';
   const existingAdmin = await queryOne('SELECT id FROM users WHERE email = ?', adminEmail);

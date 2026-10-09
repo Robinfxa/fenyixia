@@ -1,7 +1,9 @@
 import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useBills } from '../hooks/useBills'
 import { useFriends } from '../hooks/useFriends'
+import { useSettlements } from '../hooks/useSettlements'
 import Header from '../components/Layout/Header'
 import SummaryCards from '../components/BillCardCarousel/SummaryCards'
 import BillCardCarousel from '../components/BillCardCarousel/BillCardCarousel'
@@ -22,13 +24,23 @@ interface HomePageProps {
 }
 
 export default function HomePage({ onAddClick }: HomePageProps) {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { bills, loading, reload } = useBills()
   const { friends } = useFriends()
+  const { cycles: settlementCycles } = useSettlements()
   const { config } = useDebugConfig()
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null)
   const [dataFilter, setDataFilter] = useState<'all' | 'mine' | 'collect'>('all')
   const [displayMode, setDisplayMode] = useState<'carousel' | 'list'>('carousel')
+
+  // Pending and overdue settlements
+  const pendingSettlementCount = useMemo(() => {
+    return settlementCycles.filter(c => c.status === 'pending' || c.status === 'overdue').length
+  }, [settlementCycles])
+  const hasOverdueSettlements = useMemo(() => {
+    return settlementCycles.some(c => c.status === 'overdue')
+  }, [settlementCycles])
 
   // Fine-grained filter state
   const [filterOptions, setFilterOptions] = useState<BillFilterOptions>(DEFAULT_FILTER_OPTIONS)
@@ -205,6 +217,94 @@ export default function HomePage({ onAddClick }: HomePageProps) {
       />
 
       <SummaryCards bills={bills} currentUserId={user.id} />
+
+      {/* ── Weekly Settlement Banner ── */}
+      <div style={{ padding: '0 16px 10px' }}>
+        <div
+          onClick={() => navigate('/settlements')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 14px',
+            borderRadius: 14,
+            background: hasOverdueSettlements
+              ? 'linear-gradient(135deg, rgba(255, 59, 48, 0.14), rgba(255, 149, 0, 0.08))'
+              : pendingSettlementCount > 0
+              ? 'linear-gradient(135deg, rgba(10, 132, 255, 0.12), rgba(99, 102, 241, 0.08))'
+              : 'var(--bg2)',
+            border: hasOverdueSettlements
+              ? '1px solid rgba(255, 59, 48, 0.35)'
+              : pendingSettlementCount > 0
+              ? '1px solid rgba(10, 132, 255, 0.25)'
+              : '1px solid var(--sep)',
+            cursor: 'pointer',
+            boxShadow: hasOverdueSettlements ? '0 2px 10px rgba(255, 59, 48, 0.06)' : 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 22 }}>🗓️</span>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
+                  每周清账
+                </span>
+                {hasOverdueSettlements && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#fff',
+                      background: 'linear-gradient(135deg, #FF3B30, #FF9500)',
+                      padding: '2px 6px',
+                      borderRadius: 6,
+                    }}
+                  >
+                    逾期顺延
+                  </span>
+                )}
+                {pendingSettlementCount > 0 && !hasOverdueSettlements && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: 'var(--blue)',
+                      background: 'rgba(10, 132, 255, 0.12)',
+                      padding: '2px 6px',
+                      borderRadius: 6,
+                    }}
+                  >
+                    {pendingSettlementCount} 位待结
+                  </span>
+                )}
+                {pendingSettlementCount === 0 && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: 'var(--green)',
+                      background: 'rgba(48, 209, 88, 0.12)',
+                      padding: '2px 6px',
+                      borderRadius: 6,
+                    }}
+                  >
+                    ✓ 已两清
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 2 }}>
+                {pendingSettlementCount > 0
+                  ? '与好友本周轧差互结，支持上传凭证结清'
+                  : '本周往来账目全部两清，点击查看结算明细'}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--blue)', fontSize: 12, fontWeight: 600 }}>
+            <span>{pendingSettlementCount > 0 ? '去清账' : '查看'}</span>
+            <span style={{ fontSize: 14 }}>›</span>
+          </div>
+        </div>
+      </div>
 
       {/* ── Search & Filter Bar ── */}
       <div style={{ padding: '0 16px 10px' }}>

@@ -207,6 +207,9 @@ CREATE TABLE IF NOT EXISTS settlement_cycles (
   status VARCHAR NOT NULL DEFAULT 'pending',
   net_amount DECIMAL(10,2) DEFAULT 0.00,
   settled_bill_ids VARCHAR DEFAULT '[]',
+  proof_image_url VARCHAR,
+  proof_note VARCHAR,
+  confirmed_by VARCHAR,
   confirmed_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
