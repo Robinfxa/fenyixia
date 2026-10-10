@@ -6,22 +6,153 @@ import { requestCodexDeviceCode, pollCodexDeviceToken } from '../ai/codexAuth.js
 import { syncCodexAuthFromDb, callCodex } from '../ai/codex.js';
 import { AppEnv } from '../types.js';
 
-export const ADMIN_EMAIL = 'robinfxa@gmail.com';
+export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'robinfxa@gmail.com';
+
+export async function getSubAdminEmails(): Promise<string[]> {
+  const envSubAdmins = (process.env.SUB_ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  const row = await db.queryOne<{ value: string }>(
+    "SELECT value FROM system_settings WHERE key = 'sub_admin_emails'"
+  );
+  let dbSubAdmins: string[] = [];
+  if (row?.value) {
+    try {
+      dbSubAdmins = JSON.parse(row.value);
+    } catch {
+      dbSubAdmins = row.value.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    }
+  }
+
+  return Array.from(new Set([...envSubAdmins, ...dbSubAdmins]));
+}
+
+export async function saveSubAdminEmails(emails: string[]): Promise<void> {
+  const cleanList = Array.from(new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean)));
+  await db.run(
+    `INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+     VALUES ('sub_admin_emails', ?, CURRENT_TIMESTAMP)`,
+    JSON.stringify(cleanList)
+  );
+}
+
+export async function getAdminRole(email?: string): Promise<'super_admin' | 'sub_admin' | null> {
+  if (!email) return null;
+  const cleanEmail = email.trim().toLowerCase();
+  if (cleanEmail === ADMIN_EMAIL.toLowerCase()) return 'super_admin';
+
+  const subAdmins = await getSubAdminEmails();
+  if (subAdmins.includes(cleanEmail)) return 'sub_admin';
+
+  return null;
+}
 
 export const adminRoute = new Hono<AppEnv>();
 adminRoute.use('*', authMiddleware);
 
-// Admin-only guardrail middleware
+// Admin-only guardrail middleware with sub-admin role differentiation
 adminRoute.use('*', async (c, next) => {
   const user = c.get('user');
-  if (!user || user.email !== ADMIN_EMAIL) {
-    return c.json({ error: `未授权：仅管理员 ${ADMIN_EMAIL} 可访问控制台` }, 403);
+  if (!user) {
+    return c.json({ error: '未登录' }, 401);
   }
   // API tokens cannot access admin endpoints — require interactive session
   if (c.get('authKind') === 'api_token') {
     return c.json({ error: '管理接口不允许使用 API Token 访问，请使用浏览器登录' }, 403);
   }
+
+  const role = await getAdminRole(user.email);
+  if (!role) {
+    return c.json({ error: `未授权：仅管理员可访问管理控制台` }, 403);
+  }
+
+  // Check sub-admin permissions: sub-admins can ONLY access AI/Codex/TokenStats/Role routes
+  const path = c.req.path;
+  const isAiRoute =
+    path.includes('/openai-config') ||
+    path.includes('/codex/') ||
+    path.includes('/openai-test') ||
+    path.includes('/token-stats') ||
+    path.endsWith('/role');
+
+  if (role === 'sub_admin' && !isAiRoute) {
+    return c.json({ error: '权限不足：二级管理员仅可配置与管理 OpenAI 多模态视觉 / Codex 凭证' }, 403);
+  }
+
   await next();
+});
+
+// GET /api/admin/role - Check current user's admin role
+adminRoute.get('/role', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  return c.json({
+    role,
+    email: user.email,
+    is_super_admin: role === 'super_admin',
+    is_sub_admin: role === 'sub_admin',
+  });
+});
+
+// GET /api/admin/sub-admins - List secondary admins (super admin only)
+adminRoute.get('/sub-admins', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可查看和管理二级管理员' }, 403);
+  }
+  const subAdmins = await getSubAdminEmails();
+  return c.json({ sub_admins: subAdmins });
+});
+
+// POST /api/admin/sub-admins - Grant secondary admin rights (super admin only)
+adminRoute.post('/sub-admins', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可添加二级管理员' }, 403);
+  }
+  const body = await c.req.json().catch(() => ({}));
+  const email = String(body.email || '').trim().toLowerCase();
+  if (!email || !email.includes('@')) {
+    return c.json({ error: '请输入有效的邮箱地址' }, 400);
+  }
+  if (email === ADMIN_EMAIL.toLowerCase()) {
+    return c.json({ error: '该邮箱为超级管理员，无需设为二级管理员' }, 400);
+  }
+
+  const current = await getSubAdminEmails();
+  if (!current.includes(email)) {
+    current.push(email);
+    await saveSubAdminEmails(current);
+  }
+
+  return c.json({
+    success: true,
+    message: `已成功将 ${email} 授权为二级管理员（可配置 OpenAI / Codex 凭证）`,
+    sub_admins: current,
+  });
+});
+
+// DELETE /api/admin/sub-admins/:email - Revoke secondary admin rights (super admin only)
+adminRoute.delete('/sub-admins/:email', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可移除二级管理员' }, 403);
+  }
+  const targetEmail = decodeURIComponent(c.req.param('email')).trim().toLowerCase();
+  const current = await getSubAdminEmails();
+  const updated = current.filter((e) => e !== targetEmail);
+  await saveSubAdminEmails(updated);
+
+  return c.json({
+    success: true,
+    message: `已移除 ${targetEmail} 的二级管理员权限`,
+    sub_admins: updated,
+  });
 });
 
 // GET /api/admin/users
@@ -327,8 +458,14 @@ adminRoute.post('/openai-test', async (c) => {
   }
 });
 
-// POST /api/admin/clean-db
+// POST /api/admin/clean-db (super admin only)
 adminRoute.post('/clean-db', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可执行清空数据库操作' }, 403);
+  }
+
   await db.run("DELETE FROM users WHERE email != 'robinfxa@gmail.com'");
   await db.run('DELETE FROM bills');
   await db.run('DELETE FROM bill_items');
@@ -373,8 +510,14 @@ adminRoute.get('/public-url', async (c) => {
   });
 });
 
-// POST /api/admin/public-url
+// POST /api/admin/public-url (super admin only)
 adminRoute.post('/public-url', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可配置公网地址' }, 403);
+  }
+
   const body = await c.req.json().catch(() => ({}));
   const rawUrl = body.public_api_base_url !== undefined ? String(body.public_api_base_url).trim() : '';
 

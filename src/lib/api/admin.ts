@@ -132,3 +132,29 @@ export async function adminSavePublicUrlConfig(public_api_base_url: string): Pro
   return await api.post('/api/admin/public-url', { public_api_base_url });
 }
 
+export interface AdminRoleInfo {
+  role: 'super_admin' | 'sub_admin' | null;
+  email: string;
+  is_super_admin: boolean;
+  is_sub_admin: boolean;
+}
+export type AdminRoleResponse = AdminRoleInfo;
+
+export async function adminGetRole(): Promise<AdminRoleInfo> {
+  return await api.get<AdminRoleInfo>('/api/admin/role');
+}
+
+export async function adminListSubAdmins(): Promise<string[]> {
+  const res = await api.get<{ sub_admins: string[] }>('/api/admin/sub-admins');
+  return res.sub_admins || [];
+}
+
+export async function adminAddSubAdmin(email: string): Promise<{ success: boolean; message: string; sub_admins: string[] }> {
+  return await api.post('/api/admin/sub-admins', { email });
+}
+
+export async function adminRemoveSubAdmin(email: string): Promise<{ success: boolean; message: string; sub_admins: string[] }> {
+  return await api.delete(`/api/admin/sub-admins/${encodeURIComponent(email)}`);
+}
+
+

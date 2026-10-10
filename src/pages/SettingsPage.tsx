@@ -4,6 +4,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useProfile, mutateProfile, type Profile } from '../hooks/useProfile'
 import { useGoogleIdentity } from '../hooks/useGoogleIdentity'
 import { getApiToken, createApiToken, revokeApiToken, type ApiToken } from '../lib/api/apiTokens'
+import { adminGetRole, type AdminRoleResponse } from '../lib/api/admin'
 import { updateProfile, uploadAvatar } from '../lib/api/auth'
 import { compressAvatar, formatBytes } from '../lib/imageCompress'
 import { useToast } from '../contexts/ToastContext'
@@ -42,6 +43,7 @@ export default function SettingsPage({ onAddClick }: { onAddClick?: () => void }
     const [apiToken, setApiToken] = useState<ApiToken | null>(null)
     const [apiBaseUrl, setApiBaseUrl] = useState<string>(computeDefaultApiBase())
     const [isCustomUrl, setIsCustomUrl] = useState(false)
+    const [adminRole, setAdminRole] = useState<AdminRoleResponse | null>(null)
     const [tokenLoading, setTokenLoading] = useState(true)
     const [tokenWorking, setTokenWorking] = useState(false)
     const [showToken, setShowToken] = useState(false)
@@ -53,7 +55,7 @@ export default function SettingsPage({ onAddClick }: { onAddClick?: () => void }
 
     const handleCopyAiPrompt = async () => {
         if (!apiToken) return
-        const isAdmin = profile?.email === 'robinfxa@gmail.com'
+        const isAdmin = adminRole?.is_super_admin ?? (profile?.email === 'robinfxa@gmail.com')
         const prompt = `# 分一哈 (fenyixia) 账单管理助手接入配置
 
 请作为我的个人记账与账单管理助理。你可以直接调用以下 HTTP API 管理我的账单与联系人：
@@ -120,6 +122,8 @@ ${isAdmin ? `
                 setIsCustomUrl(Boolean(res.is_custom_url))
             }
         }).finally(() => setTokenLoading(false))
+
+        adminGetRole().then(setAdminRole).catch(() => setAdminRole(null))
     }, [])
 
     const handleGenerate = async () => {
@@ -307,7 +311,54 @@ ${isAdmin ? `
                     )}
                 </div>
 
-
+                {/* Admin Entrance */}
+                {adminRole && (adminRole.is_super_admin || adminRole.is_sub_admin) && (
+                    <div style={{
+                        background: 'var(--bg2)',
+                        borderRadius: 12,
+                        padding: '14px 16px',
+                        marginBottom: 20,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        border: adminRole.is_super_admin ? '1px solid rgba(255, 159, 10, 0.25)' : '1px solid rgba(10, 132, 255, 0.25)',
+                    }}>
+                        <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--label1)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span>{adminRole.is_super_admin ? '🛡️ 超级管理员控制台' : '🤖 AI 凭证管理后台'}</span>
+                                <span style={{
+                                    fontSize: 10,
+                                    padding: '1px 6px',
+                                    borderRadius: 4,
+                                    background: adminRole.is_super_admin ? 'rgba(255,159,10,0.15)' : 'rgba(10,132,255,0.12)',
+                                    color: adminRole.is_super_admin ? '#FF9F0A' : 'var(--blue)',
+                                    fontWeight: 700,
+                                }}>
+                                    {adminRole.is_super_admin ? 'SUPER' : 'SUB ADMIN'}
+                                </span>
+                            </div>
+                            <div style={{ fontSize: 12, color: 'var(--label3)', marginTop: 4 }}>
+                                {adminRole.is_super_admin ? '系统监控、二级管理员授权、用户与邮件日志' : '配置与测试 OpenAI / Codex 视觉识别凭证'}
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => navigate('/admin')}
+                            style={{
+                                padding: '8px 14px',
+                                borderRadius: 8,
+                                border: 'none',
+                                background: adminRole.is_super_admin ? 'rgba(255, 159, 10, 0.15)' : 'rgba(10, 132, 255, 0.12)',
+                                color: adminRole.is_super_admin ? '#FF9F0A' : 'var(--blue)',
+                                fontSize: 13,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                flexShrink: 0,
+                            }}
+                        >
+                            进入后台 →
+                        </button>
+                    </div>
+                )}
 
                 {/* API Token */}
                 <div style={{ background: 'var(--bg2)', borderRadius: 12, padding: '14px 16px', marginBottom: 20 }}>
@@ -350,7 +401,7 @@ ${isAdmin ? `
                             <div style={{ marginTop: 10, fontSize: 11, color: 'var(--label3)', lineHeight: 1.6 }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                     <span style={{ fontWeight: 600, color: 'var(--label2)' }}>给 AI 的使用说明</span>
-                                    {profile?.email === 'robinfxa@gmail.com' && (
+                                    {adminRole?.is_super_admin && (
                                         <button
                                             onClick={() => navigate('/admin')}
                                             style={{

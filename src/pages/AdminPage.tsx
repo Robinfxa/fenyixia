@@ -15,8 +15,12 @@ import {
   adminPollCodexDeviceToken,
   adminGetPublicUrlConfig,
   adminSavePublicUrlConfig,
+  adminGetRole,
+  adminListSubAdmins,
+  adminAddSubAdmin,
+  adminRemoveSubAdmin,
 } from '../lib/api/admin'
-import type { AdminUser, EmailStats, TokenStat, OpenAiConfig, CodexDeviceCodeResponse, PublicUrlConfig } from '../lib/api/admin'
+import type { AdminUser, EmailStats, TokenStat, OpenAiConfig, CodexDeviceCodeResponse, PublicUrlConfig, AdminRoleInfo } from '../lib/api/admin'
 
 
 const ADMIN_EMAIL = 'robinfxa@gmail.com'
@@ -39,6 +43,12 @@ function RateIndicator({ count }: { count: number }) {
 export default function AdminPage() {
   const { user, loading } = useAuth()
   const navigate = useNavigate()
+
+  const [adminRoleInfo, setAdminRoleInfo] = useState<AdminRoleInfo | null>(null)
+  const [subAdmins, setSubAdmins] = useState<string[]>([])
+  const [newSubAdminEmail, setNewSubAdminEmail] = useState('')
+  const [subAdminLoading, setSubAdminLoading] = useState(false)
+  const [subAdminMessage, setSubAdminMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   const [users, setUsers] = useState<AdminUser[]>([])
   const [emailStats, setEmailStats] = useState<EmailStats | null>(null)
@@ -67,11 +77,22 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (loading) return
-    if (!user || user.email !== ADMIN_EMAIL) {
+    if (!user) {
       navigate('/', { replace: true })
       return
     }
-    loadData()
+
+    // Role check
+    adminGetRole().then(info => {
+      if (!info.role) {
+        navigate('/', { replace: true })
+        return
+      }
+      setAdminRoleInfo(info)
+      loadData(info.role)
+    }).catch(() => {
+      navigate('/', { replace: true })
+    })
   }, [user, loading])
 
   // Polling effect for Codex Device Code Authorization
@@ -141,29 +162,76 @@ export default function AdminPage() {
     }
   }
 
-  async function loadData() {
+  async function loadData(role?: 'super_admin' | 'sub_admin' | null) {
     setLoadingData(true)
     setError('')
+    const targetRole = role || adminRoleInfo?.role
+
     try {
-      const [u, s, t, o, p] = await Promise.all([
-        adminListUsers(),
-        adminGetEmailStats(),
-        adminGetTokenStats(),
-        adminGetOpenAiConfig(),
-        adminGetPublicUrlConfig(),
-      ])
-      setUsers(u)
-      setEmailStats(s)
-      setTokenStats(t)
-      setOpenAiConfig(o)
-      if (o?.model) setModelInput(o.model)
-      if (o?.base_url && o.base_url !== 'https://api.openai.com/v1') setBaseUrlInput(o.base_url)
-      setPublicUrlConfig(p)
-      setPublicUrlInput(p?.configured_url || '')
+      if (targetRole === 'sub_admin') {
+        const [t, o] = await Promise.all([
+          adminGetTokenStats(),
+          adminGetOpenAiConfig(),
+        ])
+        setTokenStats(t)
+        setOpenAiConfig(o)
+        if (o?.model) setModelInput(o.model)
+        if (o?.base_url && o.base_url !== 'https://api.openai.com/v1') setBaseUrlInput(o.base_url)
+      } else {
+        const [u, s, t, o, p, subs] = await Promise.all([
+          adminListUsers(),
+          adminGetEmailStats(),
+          adminGetTokenStats(),
+          adminGetOpenAiConfig(),
+          adminGetPublicUrlConfig(),
+          adminListSubAdmins(),
+        ])
+        setUsers(u)
+        setEmailStats(s)
+        setTokenStats(t)
+        setOpenAiConfig(o)
+        setSubAdmins(subs)
+        if (o?.model) setModelInput(o.model)
+        if (o?.base_url && o.base_url !== 'https://api.openai.com/v1') setBaseUrlInput(o.base_url)
+        setPublicUrlConfig(p)
+        setPublicUrlInput(p?.configured_url || '')
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoadingData(false)
+    }
+  }
+
+  async function handleAddSubAdmin() {
+    const email = newSubAdminEmail.trim()
+    if (!email) return
+    setSubAdminLoading(true)
+    setSubAdminMessage(null)
+    try {
+      const res = await adminAddSubAdmin(email)
+      setSubAdmins(res.sub_admins || [])
+      setNewSubAdminEmail('')
+      setSubAdminMessage({ type: 'success', text: res.message || `已添加二级管理员: ${email}` })
+    } catch (e: any) {
+      setSubAdminMessage({ type: 'error', text: e.message || '添加二级管理员失败' })
+    } finally {
+      setSubAdminLoading(false)
+    }
+  }
+
+  async function handleRemoveSubAdmin(targetEmail: string) {
+    if (!window.confirm(`确定要撤销 ${targetEmail} 的二级管理员权限吗？`)) return
+    setSubAdminLoading(true)
+    setSubAdminMessage(null)
+    try {
+      const res = await adminRemoveSubAdmin(targetEmail)
+      setSubAdmins(res.sub_admins || [])
+      setSubAdminMessage({ type: 'success', text: res.message || `已移除二级管理员: ${targetEmail}` })
+    } catch (e: any) {
+      setSubAdminMessage({ type: 'error', text: e.message || '移除二级管理员失败' })
+    } finally {
+      setSubAdminLoading(false)
     }
   }
 
@@ -280,7 +348,23 @@ export default function AdminPage() {
     <div className="admin-page">
       <div className="admin-header">
         <button className="admin-back" onClick={() => navigate('/')}>← 返回</button>
-        <h1 className="admin-title">管理员面板</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <h1 className="admin-title" style={{ margin: 0 }}>
+            {adminRoleInfo?.is_super_admin ? '👑 超级管理员控制台' : '🤖 二级管理员 (AI 凭证配置)'}
+          </h1>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: 8,
+              background: adminRoleInfo?.is_super_admin ? 'rgba(255, 149, 0, 0.15)' : 'rgba(10, 132, 255, 0.15)',
+              color: adminRoleInfo?.is_super_admin ? '#FF9500' : 'var(--blue)',
+            }}
+          >
+            {adminRoleInfo?.is_super_admin ? '超级管理员' : '二级管理员'}
+          </span>
+        </div>
       </div>
 
       {error && (
@@ -1127,185 +1211,343 @@ export default function AdminPage() {
             )}
           </section>
 
-          {/* Public API Base URL Configuration */}
-          <section className="admin-section">
-            <div className="admin-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>🌐 公开服务地址配置 (Public API Base URL)</span>
-              <span style={{
-                fontSize: 12,
-                fontWeight: 600,
-                padding: '2px 8px',
-                borderRadius: 10,
-                background: publicUrlConfig?.is_custom ? 'rgba(48, 209, 88, 0.15)' : 'rgba(10, 132, 255, 0.15)',
-                color: publicUrlConfig?.is_custom ? '#30D158' : '#0A84FF',
-              }}>
-                {publicUrlConfig?.is_custom ? '● 管理员已自定义' : '○ 自动感知当前域名'}
-              </span>
-            </div>
-
-            <div style={{ fontSize: 13, color: 'var(--label3)', marginBottom: 14, lineHeight: 1.5 }}>
-              用于在用户「设置 - AI API Token」页面中指引 AI 助手（ChatGPT、Claude、Cursor、Dify 等）访问后端。当您将系统部署到云端服务器或配置反向代理/公网域名时，可在此统一指定，或留空随用户访问域名自动切换。
-            </div>
-
-            {publicUrlMessage && (
-              <div style={{
-                padding: '10px 14px',
-                borderRadius: 8,
-                marginBottom: 14,
-                fontSize: 13,
-                background: publicUrlMessage.type === 'success' ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 59, 48, 0.12)',
-                color: publicUrlMessage.type === 'success' ? '#30D158' : '#FF453A',
-                border: `1px solid ${publicUrlMessage.type === 'success' ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 59, 48, 0.3)'}`,
-              }}>
-                {publicUrlMessage.text}
-              </div>
-            )}
-
-            <div style={{ background: 'var(--bg3)', borderRadius: 12, padding: '16px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 14 }}>
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--label3)' }}>当前生效 Base URL</div>
-                  <div style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: 'var(--blue)', marginTop: 2, wordBreak: 'break-all' }}>
-                    {publicUrlConfig?.active_url || '—'}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--label3)' }}>后端自动感知地址 (基于请求 Host)</div>
-                  <div style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--label2)', marginTop: 2, wordBreak: 'break-all' }}>
-                    {publicUrlConfig?.detected_url || '—'}
-                  </div>
-                </div>
+          {/* ── Sub-Admin Authorization Management (Super Admin only) ── */}
+          {adminRoleInfo?.is_super_admin && (
+            <section className="admin-section">
+              <div className="admin-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>🛡️ 二级管理员管理 (可修改 AI 视觉与 Codex 凭证)</span>
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 10,
+                  background: subAdmins.length > 0 ? 'rgba(10, 132, 255, 0.15)' : 'var(--bg3)',
+                  color: subAdmins.length > 0 ? 'var(--blue)' : 'var(--label3)',
+                }}>
+                  {subAdmins.length > 0 ? `已授权 ${subAdmins.length} 人` : '未设置'}
+                </span>
               </div>
 
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
-                  自定义统一公开服务 URL
+              <div style={{ fontSize: 13, color: 'var(--label3)', marginBottom: 14, lineHeight: 1.5 }}>
+                主管理员可自由添加或移除二级管理员。二级管理员拥有配置与修改 <strong>OpenAI 多模态视觉 API 及 Codex 凭证配置</strong> 的权限，无法访问用户列表、敏感数据或执行数据库清理。
+              </div>
+
+              {subAdminMessage && (
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: 8,
+                  marginBottom: 14,
+                  fontSize: 13,
+                  background: subAdminMessage.type === 'success' ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 59, 48, 0.12)',
+                  color: subAdminMessage.type === 'success' ? '#30D158' : '#FF453A',
+                  border: `1px solid ${subAdminMessage.type === 'success' ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 59, 48, 0.3)'}`,
+                }}>
+                  {subAdminMessage.text}
+                </div>
+              )}
+
+              <div style={{ background: 'var(--bg3)', borderRadius: 12, padding: '16px', marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--label2)', marginBottom: 8 }}>
+                  添加二级管理员邮箱
                 </label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
-                    type="text"
-                    value={publicUrlInput}
-                    onChange={(e) => setPublicUrlInput(e.target.value)}
-                    placeholder="例如：https://fenyixia.example.com/api"
+                    type="email"
+                    value={newSubAdminEmail}
+                    onChange={(e) => setNewSubAdminEmail(e.target.value)}
+                    placeholder="输入需要授权的用户邮箱，如 assistant@luminet.shop"
                     style={{
                       flex: 1,
-                      padding: '9px 12px',
-                      borderRadius: 8,
-                      border: '1px solid var(--border)',
                       background: 'var(--bg2)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      padding: '8px 12px',
                       color: 'var(--label1)',
                       fontSize: 13,
-                      fontFamily: 'monospace',
+                      outline: 'none',
                     }}
                   />
                   <button
                     type="button"
-                    onClick={handleFillCurrentOrigin}
+                    disabled={subAdminLoading || !newSubAdminEmail.trim()}
+                    onClick={handleAddSubAdmin}
                     style={{
-                      background: 'rgba(10, 132, 255, 0.12)',
-                      color: 'var(--blue)',
+                      background: 'var(--blue)',
+                      color: '#fff',
                       border: 'none',
                       borderRadius: 8,
-                      padding: '9px 12px',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    ⚡ 填入当前域名
-                  </button>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 4 }}>
-                  提示：若清空并保存，系统将自动恢复为动态探测请求域名（多域名部署或内网穿透时推荐）。
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button
-                  onClick={handleSavePublicUrl}
-                  disabled={savingPublicUrl}
-                  style={{
-                    background: 'var(--blue)',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 8,
-                    padding: '9px 16px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {savingPublicUrl ? '保存中...' : '💾 保存配置'}
-                </button>
-                {publicUrlConfig?.is_custom && (
-                  <button
-                    onClick={handleResetPublicUrl}
-                    disabled={savingPublicUrl}
-                    style={{
-                      background: 'var(--bg4)',
-                      color: 'var(--label2)',
-                      border: 'none',
-                      borderRadius: 8,
-                      padding: '9px 16px',
+                      padding: '8px 16px',
                       fontSize: 13,
                       fontWeight: 600,
-                      cursor: 'pointer',
+                      cursor: subAdminLoading || !newSubAdminEmail.trim() ? 'not-allowed' : 'pointer',
+                      opacity: subAdminLoading || !newSubAdminEmail.trim() ? 0.6 : 1,
                     }}
                   >
-                    🔄 恢复自动感知
+                    {subAdminLoading ? '处理中...' : '➕ 添加授权'}
                   </button>
+                </div>
+
+                {/* Quick pick from registered users */}
+                {users.length > 0 && (
+                  <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: 'var(--label3)' }}>从注册用户快速选择:</span>
+                    {users.filter(u => u.email !== ADMIN_EMAIL && !subAdmins.includes((u.email || '').toLowerCase())).slice(0, 6).map(u => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => setNewSubAdminEmail(u.email)}
+                        style={{
+                          background: 'var(--bg2)',
+                          border: '1px solid var(--sep)',
+                          borderRadius: 6,
+                          padding: '2px 8px',
+                          fontSize: 11,
+                          color: 'var(--label2)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {u.name || u.email}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
-            </div>
-          </section>
 
-          {/* Email Stats */}
-          <section className="admin-section">
-
-            <div className="admin-section-title">
-              邮件发送追踪
-              <span className="admin-section-note">
-                （仅追踪通过「分一下」发送的邀请邮件，Supabase 系统邮件不在此范围）
-              </span>
-            </div>
-
-            <div className="admin-stat-cards">
-              <div className="admin-stat-card">
-                <div className="admin-stat-row">
-                  {emailStats && <RateIndicator count={emailStats.last_hour} />}
-                  <span className="admin-stat-value">{emailStats?.last_hour ?? '—'}</span>
-                  <span className="admin-stat-label">/ 最近1小时</span>
+              {/* Current Sub-Admins List */}
+              <div style={{ background: 'var(--bg2)', borderRadius: 12, padding: '12px 14px', border: '1px solid var(--sep)' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--label2)', marginBottom: 8 }}>
+                  当前已授权二级管理员 ({subAdmins.length})
                 </div>
-                <div className="admin-stat-limit">免费限额 {HOUR_LIMIT} 封/小时</div>
-              </div>
-              <div className="admin-stat-card">
-                <div className="admin-stat-row">
-                  <span className="admin-stat-value">{emailStats?.last_day ?? '—'}</span>
-                  <span className="admin-stat-label">/ 最近24小时</span>
-                </div>
-                <div className="admin-stat-limit">免费限额 ~50 封/天</div>
-              </div>
-            </div>
-
-            {emailStats && emailStats.recent.length > 0 && (
-              <div className="admin-email-log">
-                <div className="admin-log-header">最近发送记录</div>
-                {emailStats.recent.map((entry, i) => (
-                  <div key={i} className="admin-log-row">
-                    <span className="admin-log-time">{fmtDate(entry.sent_at)}</span>
-                    <span className="admin-log-type">{entry.email_type}</span>
-                    <span className="admin-log-email">{entry.recipient_email}</span>
+                {subAdmins.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--label3)', padding: '10px 0', textAlign: 'center' }}>
+                    暂无二级管理员。仅主管理员拥有凭证配置权限。
                   </div>
-                ))}
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {subAdmins.map((email) => (
+                      <div
+                        key={email}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 12px',
+                          background: 'var(--bg3)',
+                          borderRadius: 8,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 16 }}>🤖</span>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label1)' }}>{email}</div>
+                            <div style={{ fontSize: 10, color: 'var(--label3)' }}>权限：可配置与修改 OpenAI / Codex 凭证</div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={subAdminLoading}
+                          onClick={() => handleRemoveSubAdmin(email)}
+                          style={{
+                            background: 'rgba(255, 59, 48, 0.1)',
+                            border: '1px solid rgba(255, 59, 48, 0.25)',
+                            color: 'var(--red)',
+                            borderRadius: 6,
+                            padding: '4px 10px',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🗑️ 移除权限
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-            {emailStats && emailStats.recent.length === 0 && (
-              <div className="admin-empty">暂无发送记录</div>
-            )}
-          </section>
+            </section>
+          )}
 
-          {/* Token Usage */}
+          {/* ── Super Admin Only Sections ── */}
+          {adminRoleInfo?.is_super_admin && (
+            <>
+              {/* Public API Base URL Configuration */}
+              <section className="admin-section">
+                <div className="admin-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>🌐 公开服务地址配置 (Public API Base URL)</span>
+                  <span style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    padding: '2px 8px',
+                    borderRadius: 10,
+                    background: publicUrlConfig?.is_custom ? 'rgba(48, 209, 88, 0.15)' : 'rgba(10, 132, 255, 0.15)',
+                    color: publicUrlConfig?.is_custom ? '#30D158' : '#0A84FF',
+                  }}>
+                    {publicUrlConfig?.is_custom ? '● 管理员已自定义' : '○ 自动感知当前域名'}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: 13, color: 'var(--label3)', marginBottom: 14, lineHeight: 1.5 }}>
+                  用于在用户「设置 - AI API Token」页面中指引 AI 助手访问后端。
+                </div>
+
+                {publicUrlMessage && (
+                  <div style={{
+                    padding: '10px 14px',
+                    borderRadius: 8,
+                    marginBottom: 14,
+                    fontSize: 13,
+                    background: publicUrlMessage.type === 'success' ? 'rgba(48, 209, 88, 0.12)' : 'rgba(255, 59, 48, 0.12)',
+                    color: publicUrlMessage.type === 'success' ? '#30D158' : '#FF453A',
+                    border: `1px solid ${publicUrlMessage.type === 'success' ? 'rgba(48, 209, 88, 0.3)' : 'rgba(255, 59, 48, 0.3)'}`,
+                  }}>
+                    {publicUrlMessage.text}
+                  </div>
+                )}
+
+                <div style={{ background: 'var(--bg3)', borderRadius: 12, padding: '16px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 14 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--label3)' }}>当前生效 Base URL</div>
+                      <div style={{ fontSize: 13, fontFamily: 'monospace', fontWeight: 600, color: 'var(--blue)', marginTop: 2, wordBreak: 'break-all' }}>
+                        {publicUrlConfig?.active_url || '—'}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--label3)' }}>后端自动感知地址</div>
+                      <div style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--label2)', marginTop: 2, wordBreak: 'break-all' }}>
+                        {publicUrlConfig?.detected_url || '—'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
+                      自定义统一公开服务 URL
+                    </label>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        value={publicUrlInput}
+                        onChange={(e) => setPublicUrlInput(e.target.value)}
+                        placeholder="例如：https://fenyixia.example.com/api"
+                        style={{
+                          flex: 1,
+                          padding: '9px 12px',
+                          borderRadius: 8,
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg2)',
+                          color: 'var(--label1)',
+                          fontSize: 13,
+                          fontFamily: 'monospace',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleFillCurrentOrigin}
+                        style={{
+                          background: 'rgba(10, 132, 255, 0.12)',
+                          color: 'var(--blue)',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '9px 12px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        ⚡ 填入当前域名
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button
+                      onClick={handleSavePublicUrl}
+                      disabled={savingPublicUrl}
+                      style={{
+                        background: 'var(--blue)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '9px 16px',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {savingPublicUrl ? '保存中...' : '💾 保存配置'}
+                    </button>
+                    {publicUrlConfig?.is_custom && (
+                      <button
+                        onClick={handleResetPublicUrl}
+                        disabled={savingPublicUrl}
+                        style={{
+                          background: 'var(--bg4)',
+                          color: 'var(--label2)',
+                          border: 'none',
+                          borderRadius: 8,
+                          padding: '9px 16px',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🔄 恢复自动感知
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* Email Stats */}
+              <section className="admin-section">
+                <div className="admin-section-title">
+                  邮件发送追踪
+                  <span className="admin-section-note">
+                    （仅追踪通过「分一下」发送的邀请邮件）
+                  </span>
+                </div>
+
+                <div className="admin-stat-cards">
+                  <div className="admin-stat-card">
+                    <div className="admin-stat-row">
+                      {emailStats && <RateIndicator count={emailStats.last_hour} />}
+                      <span className="admin-stat-value">{emailStats?.last_hour ?? '—'}</span>
+                      <span className="admin-stat-label">/ 最近1小时</span>
+                    </div>
+                    <div className="admin-stat-limit">免费限额 {HOUR_LIMIT} 封/小时</div>
+                  </div>
+                  <div className="admin-stat-card">
+                    <div className="admin-stat-row">
+                      <span className="admin-stat-value">{emailStats?.last_day ?? '—'}</span>
+                      <span className="admin-stat-label">/ 最近24小时</span>
+                    </div>
+                    <div className="admin-stat-limit">免费限额 ~50 封/天</div>
+                  </div>
+                </div>
+
+                {emailStats && emailStats.recent.length > 0 && (
+                  <div className="admin-email-log">
+                    <div className="admin-log-header">最近发送记录</div>
+                    {emailStats.recent.map((entry, i) => (
+                      <div key={i} className="admin-log-row">
+                        <span className="admin-log-time">{fmtDate(entry.sent_at)}</span>
+                        <span className="admin-log-type">{entry.email_type}</span>
+                        <span className="admin-log-email">{entry.recipient_email}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {emailStats && emailStats.recent.length === 0 && (
+                  <div className="admin-empty">暂无发送记录</div>
+                )}
+              </section>
+            </>
+          )}
+
+          {/* Token Usage - Visible to Both Super Admin & Sub Admin */}
           <section className="admin-section">
             <div className="admin-section-title">AI Token 消耗统计</div>
             {tokenStats.length === 0 ? (
@@ -1345,35 +1587,37 @@ export default function AdminPage() {
             )}
           </section>
 
-          {/* User List */}
-          <section className="admin-section">
-            <div className="admin-section-title">
-              注册用户 <span className="admin-count">({users.length})</span>
-            </div>
-            {users.length === 0 && <div className="admin-empty">暂无用户</div>}
-            {users.map(u => (
-              <div key={u.id} className="admin-user-row">
-                <div className="admin-user-avatar">{u.emoji ?? '👤'}</div>
-                <div className="admin-user-info">
-                  <div className="admin-user-name">{u.name ?? '（未设置昵称）'}</div>
-                  <div className="admin-user-email">{u.email}</div>
-                  <div className="admin-user-meta">
-                    注册于 {fmtDate(u.created_at)}
-                    {u.last_sign_in_at && ` · 最近登录 ${fmtDate(u.last_sign_in_at)}`}
-                  </div>
-                </div>
-                {u.email !== ADMIN_EMAIL && (
-                  <button
-                    className="admin-impersonate-btn"
-                    disabled={impersonating === u.email}
-                    onClick={() => handleImpersonate(u.email!)}
-                  >
-                    {impersonating === u.email ? '跳转中...' : '切换登录'}
-                  </button>
-                )}
+          {/* User List (Super Admin only) */}
+          {adminRoleInfo?.is_super_admin && (
+            <section className="admin-section">
+              <div className="admin-section-title">
+                注册用户 <span className="admin-count">({users.length})</span>
               </div>
-            ))}
-          </section>
+              {users.length === 0 && <div className="admin-empty">暂无用户</div>}
+              {users.map(u => (
+                <div key={u.id} className="admin-user-row">
+                  <div className="admin-user-avatar">{u.emoji ?? '👤'}</div>
+                  <div className="admin-user-info">
+                    <div className="admin-user-name">{u.name ?? '（未设置昵称）'}</div>
+                    <div className="admin-user-email">{u.email}</div>
+                    <div className="admin-user-meta">
+                      注册于 {fmtDate(u.created_at)}
+                      {u.last_sign_in_at && ` · 最近登录 ${fmtDate(u.last_sign_in_at)}`}
+                    </div>
+                  </div>
+                  {u.email !== ADMIN_EMAIL && (
+                    <button
+                      className="admin-impersonate-btn"
+                      disabled={impersonating === u.email}
+                      onClick={() => handleImpersonate(u.email!)}
+                    >
+                      {impersonating === u.email ? '跳转中...' : '切换登录'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </section>
+          )}
         </>
       )}
     </div>

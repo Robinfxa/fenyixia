@@ -6,6 +6,7 @@ import { useFriends } from '../hooks/useFriends'
 import { useGroups } from '../hooks/useGroups'
 import { useTags } from '../hooks/useTags'
 import { scanReceipt, buildScanPrompt, uploadReceiptImage, insertReceiptScan, recordTokenUsage } from '../lib/api/scan'
+import { adminGetRole, type AdminRoleResponse } from '../lib/api/admin'
 import { ICON_COLORS } from '../lib/utils'
 import type { Member } from '../lib/types'
 import type { ScanResult as ScanResultType, ScanResultItem } from '../lib/api/scan'
@@ -81,6 +82,11 @@ export default function ScanPage() {
   const [prefillBill, setPrefillBill] = useState<Bill | null>(null)
   const [error, setError] = useState('')
   const [userHint, setUserHint] = useState('')
+  const [adminRole, setAdminRole] = useState<AdminRoleResponse | null>(null)
+
+  useEffect(() => {
+    adminGetRole().then(setAdminRole).catch(() => setAdminRole(null))
+  }, [])
 
   // ── Image upload/crop handlers ──
 
@@ -223,7 +229,7 @@ export default function ScanPage() {
           </div>
           {(error.includes('OpenAI') || error.includes('凭证') || error.includes('API error') || error.includes('额度') || error.includes('quota') || error.includes('429')) && (
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 4 }}>
-              {user?.email === 'robinfxa@gmail.com' ? (
+              {(adminRole?.is_super_admin || adminRole?.is_sub_admin) ? (
                 <button
                   onClick={() => navigate('/admin')}
                   style={{
@@ -240,7 +246,7 @@ export default function ScanPage() {
                   ⚙️ 前往「管理面板」配置凭证
                 </button>
               ) : (
-                <span>请联系管理员 (robinfxa@gmail.com) 检查 API 凭证配置</span>
+                <span>请联系管理员检查 API 凭证配置</span>
               )}
             </div>
           )}
