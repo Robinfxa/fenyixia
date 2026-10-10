@@ -170,10 +170,9 @@ export async function callCodex(
     '--skip-git-repo-check',
     '--ignore-user-config',
     '--ignore-rules',
+    '--dangerously-bypass-approvals-and-sandbox',
     '-c',
     'model_reasoning_effort="none"',
-    '-s',
-    'read-only',
     '-m',
     targetModel,
     '-o',
@@ -187,8 +186,11 @@ export async function callCodex(
   args.push('-');
 
   return new Promise<LunaResponse>((resolve, reject) => {
+    const startTime = Date.now();
     let stdoutData = '';
     let stderrData = '';
+
+    console.log(`[Codex] Spawning codex exec for model=${targetModel}, images=${imageFiles.length}, promptLen=${promptText.length}`);
 
     const proc = spawn('codex', args, {
       env: {
@@ -232,6 +234,9 @@ export async function callCodex(
       }
 
       cleanupTempFiles(tempFiles);
+
+      const duration = Date.now() - startTime;
+      console.log(`[Codex] Process exited code=${code}, elapsed=${duration}ms, outputChars=${content.length}`);
 
       if (content) {
         resolve({

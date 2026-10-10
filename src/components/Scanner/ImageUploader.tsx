@@ -6,8 +6,6 @@ interface ImageUploaderProps {
   onMultiLoaded: (entries: { src: string; blob: Blob }[]) => void
 }
 
-// 针对 Android / iOS 专门优化的相册媒体选择器格式，避免 Android 打开 DocumentsUI 文件管理器
-const ALBUM_ACCEPT = 'image/jpeg,image/png,image/webp,image/jpg,image/heic,.jpg,.jpeg,.png,.webp,.heic'
 
 export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: ImageUploaderProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null)
@@ -220,7 +218,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         handleFiles(Array.from(e.dataTransfer.files))
       }}
     >
-      {/* 原生相机专属输入框（单选、强制 capture="environment"，绝不带 multiple，防止 Android 唤起文件管理器） */}
+      {/* 原生相机专属输入框（单选、强制 capture="environment"，绝不带 multiple） */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -229,20 +227,22 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         style={{ display: 'none' }}
         onChange={e => {
           const files = Array.from(e.target.files || [])
+          console.log('[Camera Input] selected files:', files.length)
           if (files.length) handleFiles(files)
           e.target.value = ''
         }}
       />
 
-      {/* 原生相册专属输入框（明确指定常见图片 MIME 与扩展名，绝不带 capture，精准呼出系统相册/Photo Picker） */}
+      {/* 原生相册专属输入框（标准 image/* 多选，绝不带 capture，呼出系统相册/Photo Picker） */}
       <input
         ref={albumInputRef}
         type="file"
-        accept={ALBUM_ACCEPT}
+        accept="image/*"
         multiple
         style={{ display: 'none' }}
         onChange={e => {
           const files = Array.from(e.target.files || [])
+          console.log('[Album Input] selected files:', files.length)
           if (files.length) handleFiles(files)
           e.target.value = ''
         }}

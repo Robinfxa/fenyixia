@@ -103,8 +103,13 @@ aiRoute.post('/scan-receipt', async (c) => {
       },
     ];
 
+    const reqStart = Date.now();
+    console.log(`[ScanReceipt] Request received: user=${user?.email || 'anon'}, images=${imageList.length}`);
+
     const lunaRes = await callLuna(messages, undefined, undefined, { jsonMode: true });
     const parsedResult = cleanJsonResponse(lunaRes.content);
+    const totalElapsed = Date.now() - reqStart;
+    console.log(`[ScanReceipt] Finished successfully in ${totalElapsed}ms, items=${parsedResult.items?.length || 0}, amount=${parsedResult.amount}`);
 
     // Record token usage if user is authenticated
     if (user) {
@@ -127,9 +132,10 @@ aiRoute.post('/scan-receipt', async (c) => {
         model: lunaRes.model,
       },
       _model: lunaRes.model,
+      _elapsed_ms: totalElapsed,
     });
   } catch (err: any) {
-    console.error('Scan receipt error:', err);
+    console.error('[ScanReceipt] Processing failed:', err);
     return c.json({ error: err.message || 'Scan receipt failed' }, 500);
   }
 });
