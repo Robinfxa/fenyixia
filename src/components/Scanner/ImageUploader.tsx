@@ -15,6 +15,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [cameraActive, setCameraActive] = useState<boolean>(false)
   const [cameraRequesting, setCameraRequesting] = useState<boolean>(false)
+  const [isVideoPlaying, setIsVideoPlaying] = useState<boolean>(false)
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
   const [torchOn, setTorchOn] = useState(false)
   const [torchSupported, setTorchSupported] = useState(false)
@@ -51,13 +52,18 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
 
   const stopCameraTracks = (s: MediaStream | null) => {
     if (s) {
-      s.getTracks().forEach(t => t.stop())
+      s.getTracks().forEach(t => {
+        try {
+          t.stop()
+        } catch {}
+      })
     }
   }
 
-  // 核心函数：申请/启动摄像头流。在真实用户手势（User Gesture）下执行，100% 触发系统权限请求
+  // 核心函数：申请/启动摄像头流，支持多层级硬件约束回退
   const startCamera = useCallback(async (fromUserGesture: boolean = false) => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      console.warn('[Camera] getUserMedia not supported in current environment')
       setCameraActive(false)
       if (fromUserGesture) {
         cameraInputRef.current?.click()
@@ -71,23 +77,43 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         stopCameraTracks(stream)
       }
 
-      // 使用最宽泛、最鲁棒的约束，确保所有移动端摄像头均可即时初始化
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: { ideal: facingMode },
-        },
-        audio: false,
+      let newStream: MediaStream | null = null
+
+      // 第 1 阶梯：优先高质量后置/前置广角
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: facingMode },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+          audio: false,
+        })
+      } catch (e1) {
+        console.warn('[Camera] High-res constraints failed, trying ideal facingMode:', e1)
+        // 第 2 阶梯：仅指定理想朝向
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: facingMode } },
+            audio: false,
+          })
+        } catch (e2) {
+          console.warn('[Camera] Ideal facingMode failed, trying generic video:', e2)
+          // 第 3 阶梯：任何可用视频流兜底
+          newStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          })
+        }
       }
 
-      const newStream = await navigator.mediaDevices.getUserMedia(constraints)
+      if (!newStream) throw new Error('No video stream obtained')
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = newStream
-        try {
-          await videoRef.current.play()
-        } catch {
-          // Play request handled
-        }
+      // 立即将 stream 注入 videoRef，防止时序丢帧
+      const video = videoRef.current
+      if (video) {
+        video.srcObject = newStream
+        video.play().catch(e => console.warn('[Camera] Autoplay initial play catch:', e))
       }
 
       setStream(newStream)
@@ -101,9 +127,9 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         setTorchSupported(false)
       }
     } catch (err: any) {
-      console.warn('Camera stream request failed:', err)
+      console.warn('[Camera] Camera stream request failed:', err)
       setCameraActive(false)
-      // 如果由用户手势触发且摄像头权限被拒或环境不支持，回退唤起原生相机
+      // 如果由用户明确手势触发且未能获得网页摄像头流，优雅降级拉起系统原生相机
       if (fromUserGesture) {
         cameraInputRef.current?.click()
       }
@@ -112,24 +138,34 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
     }
   }, [facingMode, stream])
 
-  // 页面挂载时：如果支持权限查询且已授权，自动激活；否则等待用户点击触发
+  // 保证只要 stream 发生变动或组件重绘，video 元素都绝对能获得视频源并播放
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    if (stream) {
+      if (video.srcObject !== stream) {
+        video.srcObject = stream
+      }
+      video.play().then(() => {
+        setIsVideoPlaying(true)
+      }).catch(err => {
+        console.warn('[Camera] Video play error in effect:', err)
+      })
+    } else {
+      video.srcObject = null
+      setIsVideoPlaying(false)
+    }
+  }, [stream])
+
+  // 页面挂载时：自动尝试开启相机（点开即进入拍摄状态）
   useEffect(() => {
     let unmounted = false
 
-    const checkPermissionAndStart = async () => {
-      try {
-        if (navigator.permissions && navigator.permissions.query) {
-          const status = await navigator.permissions.query({ name: 'camera' as any })
-          if (status.state === 'granted' && !unmounted) {
-            startCamera(false)
-          }
-        }
-      } catch {
-        // 部分浏览器不支持 query('camera')，静默等待用户主动点击
-      }
-    }
-
-    checkPermissionAndStart()
+    // 直接启动相机
+    startCamera(false).catch(() => {
+      // 若受限则静默等待用户轻触画面
+    })
 
     return () => {
       unmounted = true
@@ -137,7 +173,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         stopCameraTracks(stream)
       }
     }
-  }, [startCamera])
+  }, [])
 
   const handleToggleTorch = async () => {
     if (!stream) return
@@ -157,6 +193,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
       stopCameraTracks(stream)
     }
     setStream(null)
+    setIsVideoPlaying(false)
     setTorchOn(false)
     setTorchSupported(false)
     setFacingMode(prev => prev === 'environment' ? 'user' : 'environment')
@@ -166,18 +203,18 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
   const handleShutter = async () => {
     if (capturing) return
 
-    // 如果实时取景流已开启，直接从画面截帧，秒级完成，完全不跳出网页
-    if (cameraActive && videoRef.current && videoRef.current.videoWidth) {
+    // 如果实时取景流已开启且画面正常，直接截取视频高清画幅
+    const video = videoRef.current
+    if (cameraActive && video && video.videoWidth > 0 && video.videoHeight > 0) {
       setCapturing(true)
       try {
-        const video = videoRef.current
         const canvas = document.createElement('canvas')
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
         const ctx = canvas.getContext('2d')
         if (ctx) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
           canvas.toBlob(blob => {
             if (blob) {
               const file = new File([blob], `receipt_${Date.now()}.jpg`, { type: 'image/jpeg' })
@@ -190,23 +227,30 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
               }
               img.src = dataUrl
             }
-          }, 'image/jpeg', 0.85)
+          }, 'image/jpeg', 0.88)
           return
         }
       } catch (e) {
-        console.error('Video capture failed', e)
+        console.error('[Camera] Video capture frame failed:', e)
       } finally {
         setCapturing(false)
       }
     }
 
-    // 尚未开启时，由用户点击手势主动请求权限并启动相机！
-    await startCamera(true)
+    // 若当前未激活，先尝试激活摄像头；若多次未就绪则一键调起系统相机拍摄
+    if (!cameraActive) {
+      await startCamera(true)
+    } else {
+      cameraInputRef.current?.click()
+    }
   }
 
   // 点击打开系统相册
   const handleOpenAlbum = () => {
-    albumInputRef.current?.click()
+    if (albumInputRef.current) {
+      albumInputRef.current.value = ''
+      albumInputRef.current.click()
+    }
   }
 
   return (
@@ -218,7 +262,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         handleFiles(Array.from(e.dataTransfer.files))
       }}
     >
-      {/* 原生相机专属输入框（单选、强制 capture="environment"，绝不带 multiple） */}
+      {/* 原生相机专属输入框（单选、capture="environment"，绝不带 multiple，备用硬唤起系统相机） */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -233,12 +277,11 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         }}
       />
 
-      {/* 原生相册专属输入框（标准 image/* 多选，绝不带 capture，呼出系统相册/Photo Picker） */}
+      {/* 原生相册专属输入框（单选、绝不带 capture、绝不带 multiple！防止 Android 唤起 DocumentsUI 文件管理器） */}
       <input
         ref={albumInputRef}
         type="file"
         accept="image/*"
-        multiple
         style={{ display: 'none' }}
         onChange={e => {
           const files = Array.from(e.target.files || [])
@@ -248,17 +291,27 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         }}
       />
 
-      {/* 取景器主体 */}
+      {/* 取景器主体（视频标签常驻 DOM，确保 iOS / Android 流无缝挂载） */}
       <div className="scanner-viewfinder">
-        {cameraActive ? (
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          onLoadedMetadata={() => {
+            videoRef.current?.play().then(() => setIsVideoPlaying(true)).catch(() => {})
+          }}
+          onPlaying={() => setIsVideoPlaying(true)}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: cameraActive ? 'block' : 'none',
+          }}
+        />
+
+        {cameraActive && (
           <>
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="scanner-video-feed"
-            />
             <div className="scanner-top-tools">
               {torchSupported && (
                 <button
@@ -282,7 +335,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
 
             <div className="scanner-overlay-guide">
               <div className="scanner-guide-text">
-                📄 对准小票 平整拍摄
+                {isVideoPlaying ? '📄 对准小票 平整拍摄' : '⏳ 正在启动相机画面...'}
               </div>
               <div className="scanner-frame-box">
                 <div className="scanner-corner tl" />
@@ -291,13 +344,15 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
                 <div className="scanner-corner br" />
               </div>
               <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
-                点击下方圆形按钮直接拍照
+                点击下方白色圆形按钮直接拍照
               </div>
             </div>
           </>
-        ) : (
+        )}
+
+        {!cameraActive && (
           <div
-            onClick={handleShutter}
+            onClick={() => startCamera(true)}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -328,7 +383,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
             </div>
             <div>
               <div style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
-                {cameraRequesting ? '正在请求相机权限...' : '点击直接拍照'}
+                {cameraRequesting ? '正在连接摄像头...' : '点击开启相机取景'}
               </div>
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)' }}>
                 对准小票平整放置，清晰拍摄
@@ -364,14 +419,19 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         </button>
 
         {/* 关键需求：下方放置清晰的相册提取按钮，直达系统相册 */}
-        <button
-          type="button"
-          className="scanner-album-btn"
-          onClick={handleOpenAlbum}
-        >
-          <span style={{ fontSize: 17 }}>🖼️</span>
-          <span>从相册选择小票 / 截图</span>
-        </button>
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+          <button
+            type="button"
+            className="scanner-album-btn"
+            onClick={handleOpenAlbum}
+          >
+            <span style={{ fontSize: 17 }}>🖼️</span>
+            <span>从相册选择小票 / 截图</span>
+          </button>
+          <span style={{ fontSize: 11, color: 'var(--label3)', letterSpacing: '0.2px' }}>
+            点开直达照片图库（如遇系统弹窗请选择「相册」或「图库」）
+          </span>
+        </div>
       </div>
     </div>
   )
