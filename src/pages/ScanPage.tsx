@@ -250,61 +250,14 @@ export default function ScanPage() {
       )}
 
       {step === 'upload' && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-            <div style={{
-              display: 'inline-flex',
-              background: 'var(--bg2)',
-              padding: 3,
-              borderRadius: 20,
-              border: '1px solid var(--sep)',
-            }}>
-              <button
-                type="button"
-                onClick={() => setReceiptType('physical')}
-                style={{
-                  padding: '5px 14px',
-                  borderRadius: 16,
-                  border: 'none',
-                  background: receiptType === 'physical' ? 'var(--blue)' : 'transparent',
-                  color: receiptType === 'physical' ? '#fff' : 'var(--label2)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                🧾 实体小票
-              </button>
-              <button
-                type="button"
-                onClick={() => setReceiptType('digital')}
-                style={{
-                  padding: '5px 14px',
-                  borderRadius: 16,
-                  border: 'none',
-                  background: receiptType === 'digital' ? 'var(--blue)' : 'transparent',
-                  color: receiptType === 'digital' ? '#fff' : 'var(--label2)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                📱 订单截图
-              </button>
-            </div>
-          </div>
-
-          <ImageUploader
-            type={receiptType}
-            onImageLoaded={handleImageLoaded}
-            onMultiLoaded={entries => {
-              setImages(prev => [...prev, ...entries])
-              setStep('preview')
-            }}
-          />
-        </>
+        <ImageUploader
+          type={receiptType}
+          onImageLoaded={handleImageLoaded}
+          onMultiLoaded={entries => {
+            setImages(prev => [...prev, ...entries])
+            setStep('preview')
+          }}
+        />
       )}
 
       {step === 'crop' && pendingOriginal && (
