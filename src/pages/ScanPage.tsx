@@ -10,14 +10,13 @@ import { adminGetRole, type AdminRoleResponse } from '../lib/api/admin'
 import { ICON_COLORS } from '../lib/utils'
 import type { Member } from '../lib/types'
 import type { ScanResult as ScanResultType, ScanResultItem } from '../lib/api/scan'
-import ScanTypeSelector from '../components/Scanner/ScanTypeSelector'
 import ImageUploader from '../components/Scanner/ImageUploader'
 import CropOverlay from '../components/Scanner/CropOverlay'
 import MemberPickerSheet from '../components/MemberPicker/MemberPickerSheet'
 import BillSheet from '../components/SplitDetail/BillSheet'
 import type { Bill, BillItem } from '../lib/types'
 
-type Step = 'type-select' | 'upload' | 'crop' | 'preview' | 'member-select' | 'scanning' | 'result' | 'saving'
+type Step = 'upload' | 'crop' | 'preview' | 'member-select' | 'scanning' | 'result' | 'saving'
 
 // One uploaded (possibly cropped) image ready for scanning
 interface ImageEntry {
@@ -30,7 +29,7 @@ export default function ScanPage() {
   const { user } = useAuth()
   const toast = useToast()
 
-  const [step, setStep] = useState<Step>('type-select')
+  const [step, setStep] = useState<Step>('upload')
   const [receiptType, setReceiptType] = useState<'physical' | 'digital'>('physical')
 
   // Accumulated images (multi-upload)
@@ -253,19 +252,62 @@ export default function ScanPage() {
         </div>
       )}
 
-      {step === 'type-select' && (
-        <ScanTypeSelector value={receiptType} onChange={(t) => { setReceiptType(t); setStep('upload') }} />
-      )}
-
       {step === 'upload' && (
-        <ImageUploader
-          type={receiptType}
-          onImageLoaded={handleImageLoaded}
-          onMultiLoaded={entries => {
-            setImages(prev => [...prev, ...entries])
-            setStep('preview')
-          }}
-        />
+        <>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+            <div style={{
+              display: 'inline-flex',
+              background: 'var(--bg2)',
+              padding: 3,
+              borderRadius: 20,
+              border: '1px solid var(--sep)',
+            }}>
+              <button
+                type="button"
+                onClick={() => setReceiptType('physical')}
+                style={{
+                  padding: '5px 14px',
+                  borderRadius: 16,
+                  border: 'none',
+                  background: receiptType === 'physical' ? 'var(--blue)' : 'transparent',
+                  color: receiptType === 'physical' ? '#fff' : 'var(--label2)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                🧾 实体小票
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceiptType('digital')}
+                style={{
+                  padding: '5px 14px',
+                  borderRadius: 16,
+                  border: 'none',
+                  background: receiptType === 'digital' ? 'var(--blue)' : 'transparent',
+                  color: receiptType === 'digital' ? '#fff' : 'var(--label2)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                📱 订单截图
+              </button>
+            </div>
+          </div>
+
+          <ImageUploader
+            type={receiptType}
+            onImageLoaded={handleImageLoaded}
+            onMultiLoaded={entries => {
+              setImages(prev => [...prev, ...entries])
+              setStep('preview')
+            }}
+          />
+        </>
       )}
 
       {step === 'crop' && pendingOriginal && (

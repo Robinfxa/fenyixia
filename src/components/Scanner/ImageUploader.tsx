@@ -1,16 +1,22 @@
-import { useRef, useState, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 
 interface ImageUploaderProps {
   type: 'physical' | 'digital'
-  // Single file: goes through crop flow (physical) or direct add (digital)
   onImageLoaded: (file: File, img: HTMLImageElement, dataUrl: string) => void
-  // Multiple files selected at once: skip crop, add all directly
   onMultiLoaded: (entries: { src: string; blob: Blob }[]) => void
 }
 
 export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: ImageUploaderProps) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [dragging, setDragging] = useState(false)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const albumInputRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  const [stream, setStream] = useState<MediaStream | null>(null)
+  const [cameraActive, setCameraActive] = useState<boolean | null>(null)
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment')
+  const [torchOn, setTorchOn] = useState(false)
+  const [torchSupported, setTorchSupported] = useState(false)
+  const [capturing, setCapturing] = useState(false)
 
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -25,14 +31,12 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
     if (valid.length === 0) return
 
     if (valid.length === 1) {
-      // Single file — use existing flow (crop for physical, direct for digital)
       const file = valid[0]!
       const dataUrl = await readFileAsDataUrl(file)
       const img = new Image()
       img.onload = () => onImageLoaded(file, img, dataUrl)
       img.src = dataUrl
     } else {
-      // Multiple files — load all and skip crop
       const entries = await Promise.all(
         valid.map(async file => {
           const dataUrl = await readFileAsDataUrl(file)
@@ -43,20 +47,156 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
     }
   }, [onImageLoaded, onMultiLoaded])
 
+  const stopCameraTracks = (s: MediaStream | null) => {
+    if (s) {
+      s.getTracks().forEach(t => t.stop())
+    }
+  }
+
+  const startCamera = useCallback(async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setCameraActive(false)
+      return
+    }
+
+    try {
+      if (stream) {
+        stopCameraTracks(stream)
+      }
+
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: facingMode },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+        audio: false,
+      })
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = newStream
+        try {
+          await videoRef.current.play()
+        } catch {
+          // Play request might be superseded
+        }
+      }
+
+      setStream(newStream)
+      setCameraActive(true)
+
+      const track = newStream.getVideoTracks()[0]
+      const caps = track?.getCapabilities?.() as any
+      if (caps && 'torch' in caps) {
+        setTorchSupported(true)
+      } else {
+        setTorchSupported(false)
+      }
+    } catch (err: any) {
+      console.warn('Unable to access live camera stream, falling back to capture input', err)
+      setCameraActive(false)
+    }
+  }, [facingMode])
+
+  useEffect(() => {
+    startCamera()
+    return () => {
+      if (stream) {
+        stopCameraTracks(stream)
+      }
+    }
+  }, [startCamera])
+
+  const handleToggleTorch = async () => {
+    if (!stream) return
+    const track = stream.getVideoTracks()[0]
+    if (!track) return
+    try {
+      const next = !torchOn
+      await (track as any).applyConstraints({ advanced: [{ torch: next }] })
+      setTorchOn(next)
+    } catch (e) {
+      console.warn('Failed to toggle torch', e)
+    }
+  }
+
+  const handleToggleFacingMode = () => {
+    if (stream) {
+      stopCameraTracks(stream)
+    }
+    setStream(null)
+    setTorchOn(false)
+    setTorchSupported(false)
+    setFacingMode(prev => prev === 'environment' ? 'user' : 'environment')
+  }
+
+  const handleShutter = async () => {
+    if (capturing) return
+
+    if (cameraActive && videoRef.current && videoRef.current.videoWidth) {
+      setCapturing(true)
+      try {
+        const video = videoRef.current
+        const canvas = document.createElement('canvas')
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+          canvas.toBlob(blob => {
+            if (blob) {
+              const file = new File([blob], `receipt_${Date.now()}.jpg`, { type: 'image/jpeg' })
+              const img = new Image()
+              img.onload = () => {
+                if (stream) {
+                  stopCameraTracks(stream)
+                }
+                onImageLoaded(file, img, dataUrl)
+              }
+              img.src = dataUrl
+            }
+          }, 'image/jpeg', 0.92)
+          return
+        }
+      } catch (e) {
+        console.error('Video frame capture failed', e)
+      } finally {
+        setCapturing(false)
+      }
+    }
+
+    cameraInputRef.current?.click()
+  }
+
+  const handleOpenAlbum = () => {
+    albumInputRef.current?.click()
+  }
+
   return (
     <div
-      className={`scanner-upload-zone${dragging ? ' drag-over' : ''}`}
-      onClick={() => inputRef.current?.click()}
-      onDragOver={e => { e.preventDefault(); setDragging(true) }}
-      onDragLeave={() => setDragging(false)}
+      className="scanner-camera-container"
+      onDragOver={e => e.preventDefault()}
       onDrop={e => {
         e.preventDefault()
-        setDragging(false)
         handleFiles(Array.from(e.dataTransfer.files))
       }}
     >
       <input
-        ref={inputRef}
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: 'none' }}
+        onChange={e => {
+          const files = Array.from(e.target.files || [])
+          if (files.length) handleFiles(files)
+          e.target.value = ''
+        }}
+      />
+
+      <input
+        ref={albumInputRef}
         type="file"
         accept="image/*"
         multiple
@@ -67,14 +207,130 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
           e.target.value = ''
         }}
       />
-      <div className="scanner-upload-icon">{type === 'physical' ? '🧾' : '📱'}</div>
-      <div className="scanner-upload-title">
-        {type === 'physical' ? '拍照或上传实体小票' : '上传 App 订单截图'}
+
+      {/* 取景器主体 */}
+      <div className="scanner-viewfinder">
+        {cameraActive ? (
+          <>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="scanner-video-feed"
+            />
+            <div className="scanner-top-tools">
+              {torchSupported && (
+                <button
+                  type="button"
+                  className="scanner-tool-btn"
+                  onClick={handleToggleTorch}
+                  title={torchOn ? '关闭手电筒' : '开启手电筒'}
+                >
+                  {torchOn ? '⚡' : '💡'}
+                </button>
+              )}
+              <button
+                type="button"
+                className="scanner-tool-btn"
+                onClick={handleToggleFacingMode}
+                title="切换前后镜头"
+              >
+                🔄
+              </button>
+            </div>
+
+            <div className="scanner-overlay-guide">
+              <div className="scanner-guide-text">
+                {type === 'physical' ? '📄 对准小票 平整拍摄' : '📱 对准订单截图'}
+              </div>
+              <div className="scanner-frame-box">
+                <div className="scanner-corner tl" />
+                <div className="scanner-corner tr" />
+                <div className="scanner-corner bl" />
+                <div className="scanner-corner br" />
+              </div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
+                点击下方圆形按钮直接拍照
+              </div>
+            </div>
+          </>
+        ) : (
+          <div
+            onClick={() => cameraInputRef.current?.click()}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 14,
+              padding: '30px 20px',
+              cursor: 'pointer',
+              color: '#fff',
+              textAlign: 'center',
+              width: '100%',
+              height: '100%',
+              background: 'linear-gradient(180deg, #1c1c1e 0%, #121214 100%)',
+            }}
+          >
+            <div style={{
+              width: 80,
+              height: 80,
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 38,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            }}>
+              📷
+            </div>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+                点击直接拍照
+              </div>
+              <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)' }}>
+                {type === 'physical' ? '对准实体收据，清晰拍摄' : '截取订单完整明细'}
+              </div>
+            </div>
+            <div style={{
+              padding: '6px 16px',
+              borderRadius: 20,
+              background: 'var(--blue)',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 600,
+              marginTop: 4,
+            }}>
+              打开系统相机
+            </div>
+          </div>
+        )}
       </div>
-      <div className="scanner-upload-hint">
-        {type === 'physical'
-          ? '支持 JPG、PNG、HEIC · 可同时选多张'
-          : 'Uber / Lyft / DoorDash / Uber Eats · 可同时选多张'}
+
+      {/* 控制区域：拍照快门与下方相册提取按钮 */}
+      <div className="scanner-shutter-wrap">
+        <button
+          type="button"
+          className="scanner-shutter-outer"
+          onClick={handleShutter}
+          disabled={capturing}
+          aria-label="拍照"
+          style={{ opacity: capturing ? 0.6 : 1 }}
+        >
+          <div className="scanner-shutter-inner" />
+        </button>
+
+        {/* 下方放置选择相册内容的按钮 */}
+        <button
+          type="button"
+          className="scanner-album-btn"
+          onClick={handleOpenAlbum}
+        >
+          <span style={{ fontSize: 17 }}>🖼️</span>
+          <span>从相册选择小票 / 截图</span>
+        </button>
       </div>
     </div>
   )
