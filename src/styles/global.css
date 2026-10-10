@@ -527,12 +527,27 @@ body {
   overflow: hidden;
 }
 
+.sheet-drag-handle-area {
+  cursor: grab;
+  touch-action: none;
+}
+
+.sheet-drag-handle-area:active {
+  cursor: grabbing;
+}
+
 .sh {
-  width: 36px;
+  width: 38px;
   height: 5px;
   background: var(--fill);
   border-radius: 3px;
   margin: 0 auto 4px;
+  transition: opacity 0.15s, transform 0.15s, background-color 0.15s;
+}
+
+.sheet-drag-handle-area:active .sh {
+  transform: scaleX(1.15);
+  background: var(--label3);
 }
 
 .sheet-titlebar {
@@ -560,9 +575,10 @@ body {
 }
 
 .sheet-body {
-  padding: 20px 16px calc(env(safe-area-inset-bottom, 20px) + 20px);
+  padding: 16px 16px calc(env(safe-area-inset-bottom, 20px) + 20px);
   overflow-y: auto;
-  max-height: 72vh;
+  max-height: 75vh;
+  overscroll-behavior-y: contain;
 }
 
 .detail-sheet {
@@ -571,10 +587,13 @@ body {
   flex-direction: column;
 }
 
+.detail-sheet .sheet-body {
+  max-height: 84vh;
+  padding: 8px 16px calc(env(safe-area-inset-bottom, 20px) + 24px);
+}
+
 .detail-content {
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0 16px 32px;
+  padding: 0 0 24px;
 }
 
 .detail-header {

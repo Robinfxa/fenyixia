@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useState, useCallback, useEffect } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, motion, useDragControls } from 'framer-motion'
 
 interface BottomSheetProps {
   onClose: () => void
@@ -20,6 +20,7 @@ export default function BottomSheet({
   children,
 }: BottomSheetProps) {
   const [isVisible, setIsVisible] = useState(true)
+  const dragControls = useDragControls()
 
   const handleDismiss = useCallback(() => {
     setIsVisible(false)
@@ -61,6 +62,8 @@ export default function BottomSheet({
               mass: 0.85,
             }}
             drag="y"
+            dragControls={dragControls}
+            dragListener={false}
             dragConstraints={{ top: 0 }}
             dragElastic={{ top: 0.04, bottom: 0.55 }}
             onDragEnd={(_, info) => {
@@ -70,17 +73,67 @@ export default function BottomSheet({
             }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="sh" style={{ touchAction: 'none' }} />
+            {/* 专属拖拽手势区域：仅在此把手/标题区域向下滑动时才拖拽卡片，避免干扰卡片内列表滚动 */}
+            <div
+              className="sheet-drag-handle-area"
+              onPointerDown={e => dragControls.start(e)}
+              style={{
+                touchAction: 'none',
+                cursor: 'grab',
+                userSelect: 'none',
+                paddingTop: 8,
+                paddingBottom: title ? 0 : 8,
+                width: '100%',
+                flexShrink: 0,
+                position: 'relative',
+              }}
+            >
+              <div className="sh" />
 
-            {title && (
-              <div className="sheet-titlebar" style={{ touchAction: 'none' }}>
-                <button type="button" className="sheet-cancel" onClick={handleDismiss}>取消</button>
-                <div className="sh-title">{title}</div>
-                {headerRight || <div style={{ width: 44 }} />}
-              </div>
-            )}
+              {title ? (
+                <div className="sheet-titlebar" style={{ touchAction: 'none' }}>
+                  <button type="button" className="sheet-cancel" onClick={handleDismiss}>取消</button>
+                  <div className="sh-title">{title}</div>
+                  {headerRight || <div style={{ width: 44 }} />}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="sheet-close-pill"
+                  onClick={handleDismiss}
+                  aria-label="关闭"
+                  style={{
+                    position: 'absolute',
+                    right: 16,
+                    top: 8,
+                    width: 28,
+                    height: 28,
+                    borderRadius: '50%',
+                    background: 'var(--bg3)',
+                    border: 'none',
+                    color: 'var(--label2)',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
 
-            <div className="sheet-body" style={{ overflowY: 'auto', flex: 1, WebkitOverflowScrolling: 'touch' }}>
+            <div
+              className="sheet-body"
+              style={{
+                overflowY: 'auto',
+                flex: 1,
+                WebkitOverflowScrolling: 'touch',
+                overscrollBehaviorY: 'contain',
+              }}
+            >
               {children}
             </div>
           </motion.div>
