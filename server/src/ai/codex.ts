@@ -170,6 +170,8 @@ export async function callCodex(
     '--skip-git-repo-check',
     '--ignore-user-config',
     '--ignore-rules',
+    '-c',
+    'model_reasoning_effort="none"',
     '-s',
     'read-only',
     '-m',

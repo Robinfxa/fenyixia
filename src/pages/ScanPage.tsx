@@ -141,12 +141,9 @@ export default function ScanPage() {
       const memberNames = selectedMembers.map(m => m.name || m.emoji || '?')
       const prompt = buildScanPrompt(receiptType, memberNames, memberNames.length || 1, userHint.trim() || undefined, images.length)
 
-      // Convert all image blobs to base64
+      // Convert all image blobs to optimized base64 for fast and lightweight OCR
       const imagePayloads = await Promise.all(
-        images.map(async img => ({
-          base64: await blobToBase64(img.blob),
-          mediaType: img.blob.type || 'image/jpeg',
-        }))
+        images.map(img => optimizeImageForOcr(img.blob))
       )
 
       const { result, usage } = await scanReceipt(imagePayloads, prompt)
@@ -407,6 +404,69 @@ export default function ScanPage() {
 }
 
 // ── Helpers ──
+
+async function optimizeImageForOcr(
+  blob: Blob,
+  maxDim: number = 1536,
+  quality: number = 0.82
+): Promise<{ base64: string; mediaType: string }> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(blob)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      let { width, height } = img
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width)
+          width = maxDim
+        } else {
+          width = Math.round((width * maxDim) / height)
+          height = maxDim
+        }
+      }
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        blobToBase64(blob).then(b64 => resolve({ base64: b64, mediaType: blob.type || 'image/jpeg' }))
+        return
+      }
+
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+      ctx.drawImage(img, 0, 0, width, height)
+
+      canvas.toBlob(
+        (optBlob) => {
+          if (!optBlob) {
+            blobToBase64(blob).then(b64 => resolve({ base64: b64, mediaType: blob.type || 'image/jpeg' }))
+            return
+          }
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            const dataUrl = reader.result as string
+            const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1]! : dataUrl
+            resolve({
+              base64,
+              mediaType: 'image/jpeg',
+            })
+          }
+          reader.readAsDataURL(optBlob)
+        },
+        'image/jpeg',
+        quality
+      )
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      blobToBase64(blob).then(b64 => resolve({ base64: b64, mediaType: blob.type || 'image/jpeg' }))
+    }
+    img.src = url
+  })
+}
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
