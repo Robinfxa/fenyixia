@@ -5,10 +5,12 @@ import { useBills } from '../hooks/useBills';
 import { useSettlements } from '../hooks/useSettlements';
 import {
   fetchSettlementPreview,
+  fetchSettlementCycleBills,
   uploadProofImage,
   SettlementPreviewData,
   SettlementPreviewBill,
   SettlementCycle,
+  SettlementCycleBillsResponse,
 } from '../lib/api/settlements';
 import { useToast } from '../contexts/ToastContext';
 import { fmtMoney } from '../lib/utils';
@@ -28,6 +30,11 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
   const [selectedCycle, setSelectedCycle] = useState<SettlementCycle | null>(null);
   const [previewData, setPreviewData] = useState<SettlementPreviewData | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Archive detail state for inspecting settled cycle bills
+  const [archiveCycle, setArchiveCycle] = useState<SettlementCycle | null>(null);
+  const [archiveData, setArchiveData] = useState<SettlementCycleBillsResponse | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
 
   // Selected bill to view via SplitDetail (reusing original animated card, dispute, etc.)
   const [activeBillDetail, setActiveBillDetail] = useState<Bill | null>(null);
@@ -85,6 +92,58 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
         items: [],
         per_amount: previewBill.pending_amount || previewBill.my_share,
         my_share: previewBill.my_share,
+      };
+      setActiveBillDetail(fallback);
+    }
+  };
+
+  // Handle opening archive details for confirmed cycle
+  const handleOpenArchive = async (cycle: SettlementCycle) => {
+    setArchiveCycle(cycle);
+    setArchiveLoading(true);
+    setArchiveData(null);
+    try {
+      const data = await fetchSettlementCycleBills(cycle.id);
+      setArchiveData(data);
+    } catch (e: any) {
+      showToast(e.message || '加载已结清账单明细失败');
+    } finally {
+      setArchiveLoading(false);
+    }
+  };
+
+  // Select a bill from archive bills list to inspect via SplitDetail
+  const handleSelectArchiveBill = (archiveBill: any) => {
+    const fullBill = bills.find((b) => b.id === archiveBill.id);
+    if (fullBill) {
+      setActiveBillDetail(fullBill);
+    } else {
+      const fallback: Bill = {
+        id: archiveBill.id,
+        title: archiveBill.title,
+        icon: archiveBill.icon || '🧾',
+        description: archiveBill.description || '',
+        total_amount: archiveBill.total_amount,
+        date: archiveBill.date,
+        payer_id: archiveBill.payer_id,
+        payer_name: archiveBill.payer_name || '好友',
+        payer_emoji: archiveBill.payer_emoji || '👤',
+        payer_email: '',
+        settled: true,
+        color: archiveBill.color || '#4F46E5',
+        members: [],
+        items: [],
+        per_amount: archiveBill.total_amount,
+        my_share: archiveBill.total_amount,
+        _settlement: archiveData ? {
+          cycle_id: archiveData.cycle.id,
+          cycle_start: archiveData.cycle.cycle_start,
+          cycle_end: archiveData.cycle.cycle_end,
+          confirmed_at: archiveData.cycle.confirmed_at || '',
+          confirmed_by: archiveData.cycle.confirmed_by || { id: '', name: '好友', emoji: '👤' },
+          proof_image_url: archiveData.cycle.proof_image_url || undefined,
+          proof_note: archiveData.cycle.proof_note || undefined,
+        } : null,
       };
       setActiveBillDetail(fallback);
     }
@@ -476,54 +535,74 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
         {/* Section: Confirmed History */}
         {confirmedCycles.length > 0 && (
           <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 8 }}>
-              已结清记录 (双方可查验凭证)
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>已结清记录 (可追溯细分账单与凭证)</span>
+              <span style={{ fontSize: 11, color: 'var(--label3)' }}>点击查看细单</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {confirmedCycles.map((c) => (
                 <div
                   key={c.id}
+                  onClick={() => handleOpenArchive(c)}
                   style={{
                     background: 'var(--bg2)',
-                    borderRadius: 12,
+                    borderRadius: 14,
                     padding: '12px 14px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     border: '1px solid var(--sep)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <div
                       style={{
-                        width: 34,
-                        height: 34,
+                        width: 36,
+                        height: 36,
                         borderRadius: '50%',
                         background: c.other_user.color || 'var(--bg3)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: 16,
+                        fontSize: 18,
+                        flexShrink: 0,
                       }}
                     >
                       {c.other_user.emoji || '👤'}
                     </div>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--label)' }}>
-                        {c.other_user.name}
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--label)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>{c.other_user.name}</span>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: 'var(--green)',
+                            background: 'rgba(48, 209, 88, 0.12)',
+                            padding: '1px 6px',
+                            borderRadius: 6,
+                            fontWeight: 700,
+                          }}
+                        >
+                          ✓ 已结清
+                        </span>
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 2 }}>
-                        {c.cycle_start} ~ {c.cycle_end} · 已结清
-                        {c.proof_note && ` (${c.proof_note})`}
+                        {c.cycle_start} ~ {c.cycle_end}
+                        {c.proof_note ? ` · ${c.proof_note}` : ''}
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {c.proof_image_url && (
                       <button
                         type="button"
-                        onClick={() => setViewProofUrl(c.proof_image_url || null)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewProofUrl(c.proof_image_url || null);
+                        }}
                         style={{
                           background: 'rgba(10, 132, 255, 0.1)',
                           border: '1px solid rgba(10, 132, 255, 0.25)',
@@ -538,17 +617,8 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
                         🖼️ 凭证
                       </button>
                     )}
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: 'var(--green)',
-                        background: 'rgba(48, 209, 88, 0.12)',
-                        padding: '2px 8px',
-                        borderRadius: 6,
-                      }}
-                    >
-                      ✓ 已两清
+                    <span style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 600, display: 'flex', alignItems: 'center' }}>
+                      明细 ›
                     </span>
                   </div>
                 </div>
@@ -863,6 +933,178 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
             >
               {isSubmittingProof ? '正在上传凭证并结清...' : proofFile ? '确认结清并保存凭证' : '请先上传付款凭证截图'}
             </button>
+          </div>
+        </BottomSheet>
+      )}
+
+      {/* ── 2.5. Settled Archive Bills Sheet (Traceability breakdown) ── */}
+      {Boolean(archiveCycle) && (
+        <BottomSheet
+          onClose={() => setArchiveCycle(null)}
+          title={archiveCycle ? `已结清归档档案 · ${archiveCycle.other_user.name}` : '已结清明细'}
+        >
+          <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {archiveLoading ? (
+              <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--label3)', fontSize: 13 }}>
+                正在调取周结清档案与细分账单...
+              </div>
+            ) : archiveData ? (
+              <>
+                {/* Audit summary card */}
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(48,209,88,0.1), rgba(10,132,255,0.08))',
+                    border: '1px solid rgba(48,209,88,0.25)',
+                    borderRadius: 14,
+                    padding: '14px 16px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
+                      🗓️ 周期结算存证
+                    </div>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--green)',
+                        background: 'rgba(48,209,88,0.15)',
+                        padding: '2px 8px',
+                        borderRadius: 6,
+                        fontWeight: 700,
+                      }}
+                    >
+                      ✓ 已结清
+                    </span>
+                  </div>
+
+                  <div style={{ fontSize: 12, color: 'var(--label2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div>
+                      <strong>结算周期：</strong>
+                      {archiveData.cycle.cycle_start} ~ {archiveData.cycle.cycle_end}
+                    </div>
+                    {archiveData.cycle.confirmed_at && (
+                      <div>
+                        <strong>结清时间：</strong>
+                        {new Date(archiveData.cycle.confirmed_at).toLocaleString('zh-CN')}
+                      </div>
+                    )}
+                    {archiveData.cycle.confirmed_by && (
+                      <div>
+                        <strong>结清确认人：</strong>
+                        {archiveData.cycle.confirmed_by.emoji} {archiveData.cycle.confirmed_by.name}
+                      </div>
+                    )}
+                    {archiveData.cycle.proof_note && (
+                      <div>
+                        <strong>转账说明：</strong>
+                        {archiveData.cycle.proof_note}
+                      </div>
+                    )}
+                  </div>
+
+                  {archiveData.cycle.proof_image_url && (
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        onClick={() => setViewProofUrl(archiveData.cycle.proof_image_url || null)}
+                        style={{
+                          width: '100%',
+                          padding: '8px 0',
+                          borderRadius: 10,
+                          border: '1px solid rgba(10,132,255,0.3)',
+                          background: 'rgba(10,132,255,0.08)',
+                          color: 'var(--blue)',
+                          fontSize: 13,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        🖼️ 查看该次周结清付款凭证大图
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bills Header */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--label2)' }}>
+                    包含细分账单 ({archiveData.bills.length} 笔 · 点击单笔可穿透核验详情)
+                  </div>
+                </div>
+
+                {/* Archive Bills List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '42vh', overflowY: 'auto' }}>
+                  {archiveData.bills.length === 0 ? (
+                    <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--label3)', fontSize: 12 }}>
+                      暂无关联细分账单数据
+                    </div>
+                  ) : (
+                    archiveData.bills.map((b) => (
+                      <div
+                        key={b.id}
+                        onClick={() => handleSelectArchiveBill(b)}
+                        style={{
+                          background: 'var(--bg2)',
+                          borderRadius: 14,
+                          padding: '12px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          border: '1px solid var(--sep)',
+                          cursor: 'pointer',
+                          transition: 'transform 0.15s ease',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 10,
+                              background: b.color ? `${b.color}22` : 'var(--bg3)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: 20,
+                            }}
+                          >
+                            {b.icon || '🧾'}
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--label)' }}>
+                              {b.title}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 2 }}>
+                              {b.date} · {b.payer_emoji} {b.payer_name} 垫付
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ textAlign: 'right' }}>
+                          <div
+                            style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: 'var(--label)',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            ¥{fmtMoney(b.total_amount)}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--blue)', marginTop: 1 }}>
+                            追溯明细 ›
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            ) : null}
           </div>
         </BottomSheet>
       )}

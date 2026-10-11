@@ -13,6 +13,20 @@ export interface BillItem {
   members: Member[]
 }
 
+export interface BillSettlementAudit {
+  cycle_id: string
+  cycle_start: string
+  cycle_end: string
+  confirmed_at: string
+  confirmed_by: {
+    id: string
+    name: string
+    emoji: string
+  }
+  proof_image_url?: string
+  proof_note?: string
+}
+
 export interface Bill {
   id: string
   icon: string
@@ -38,6 +52,8 @@ export interface Bill {
   _manualPaidUserIds?: Set<string>
   /** Active pending dispute on this bill, if any */
   _dispute?: BillDispute | null
+  /** Settlement cycle audit information if settled via weekly settlement */
+  _settlement?: BillSettlementAudit | null
 }
 
 export interface PaymentProof {

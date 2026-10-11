@@ -224,6 +224,32 @@ export async function initDb(dbFilePath?: string): Promise<void> {
     console.warn('settlement_cycles column check/alter skipped:', err);
   }
 
+  // Schema migration for bills: ensure settlement_cycle_id exists & backfill history
+  try {
+    const billCols = await query<{ name: string }>("PRAGMA table_info('bills')");
+    if (billCols.length > 0 && !billCols.some((c) => c.name === 'settlement_cycle_id')) {
+      await run('ALTER TABLE bills ADD COLUMN settlement_cycle_id VARCHAR');
+      await run('CHECKPOINT;');
+    }
+
+    // Historical backfill: associate confirmed settlement cycles with their bills
+    const confirmedCycles = await query<{ id: string; settled_bill_ids: string }>(
+      "SELECT id, settled_bill_ids FROM settlement_cycles WHERE status = 'confirmed' AND settled_bill_ids IS NOT NULL"
+    );
+    for (const c of confirmedCycles) {
+      try {
+        const ids = JSON.parse(c.settled_bill_ids || '[]');
+        if (Array.isArray(ids) && ids.length > 0) {
+          for (const bid of ids) {
+            await run('UPDATE bills SET settlement_cycle_id = ? WHERE id = ? AND settlement_cycle_id IS NULL', c.id, bid);
+          }
+        }
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('bills settlement_cycle_id migration/backfill skipped:', err);
+  }
+
   // Seed default admin user ONLY if not already present — never overwrite existing credentials
   const adminEmail = process.env.ADMIN_EMAIL || 'robinfxa@gmail.com';
   const existingAdmin = await queryOne('SELECT id FROM users WHERE email = ?', adminEmail);

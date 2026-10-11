@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS bills (
   payer_id VARCHAR NOT NULL,
   settled BOOLEAN NOT NULL DEFAULT false,
   color VARCHAR DEFAULT '#4F46E5',
+  settlement_cycle_id VARCHAR,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -225,4 +226,5 @@ CREATE INDEX IF NOT EXISTS idx_payment_proofs_bill ON payment_proofs(bill_id);
 CREATE INDEX IF NOT EXISTS idx_manual_payments_bill ON manual_payments(bill_id);
 CREATE INDEX IF NOT EXISTS idx_bill_disputes_bill ON bill_disputes(bill_id);
 CREATE INDEX IF NOT EXISTS idx_settlement_cycles_user_friend ON settlement_cycles(user_id, friend_id);
+CREATE INDEX IF NOT EXISTS idx_bills_settlement_cycle ON bills(settlement_cycle_id);
 `;

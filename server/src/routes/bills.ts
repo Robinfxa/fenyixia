@@ -143,6 +143,46 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
     });
   }
 
+  // 6. Fetch confirmed settlement cycles to attach audit traceability
+  const confirmedCycles = await db.query<any>(
+    `SELECT sc.id as cycle_id, sc.cycle_start, sc.cycle_end, sc.confirmed_at, sc.confirmed_by,
+            sc.proof_image_url, sc.proof_note, sc.settled_bill_ids,
+            u.name as confirmed_by_name, u.emoji as confirmed_by_emoji
+     FROM settlement_cycles sc
+     LEFT JOIN users u ON u.id = sc.confirmed_by
+     WHERE sc.status = 'confirmed'`
+  );
+
+  const settlementMap = new Map<string, any>();
+  for (const sc of confirmedCycles) {
+    const auditInfo = {
+      cycle_id: sc.cycle_id,
+      cycle_start: sc.cycle_start,
+      cycle_end: sc.cycle_end,
+      confirmed_at: sc.confirmed_at,
+      confirmed_by: {
+        id: sc.confirmed_by,
+        name: sc.confirmed_by_name || '好友',
+        emoji: sc.confirmed_by_emoji || '👤',
+      },
+      proof_image_url: sc.proof_image_url || '',
+      proof_note: sc.proof_note || '',
+    };
+
+    let ids: string[] = [];
+    try {
+      ids = JSON.parse(sc.settled_bill_ids || '[]');
+    } catch {}
+
+    if (Array.isArray(ids)) {
+      for (const bid of ids) {
+        if (!settlementMap.has(bid)) {
+          settlementMap.set(bid, auditInfo);
+        }
+      }
+    }
+  }
+
   // Fast O(1) in-memory reconstruction
   return billRows.map((billRow) => {
     const payer = payerMap.get(billRow.payer_id) || null;
@@ -229,6 +269,7 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
       _proofUserIds: Array.from(proofSet),
       _manualPaidUserIds: manualList,
       _dispute: dispute,
+      _settlement: settlementMap.get(billRow.id) || null,
     } as any;
   });
 }

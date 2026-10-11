@@ -91,3 +91,44 @@ export async function confirmSettlement(
 export async function skipSettlement(cycleId: string): Promise<{ success: boolean }> {
   return await api.delete(`/api/settlements/${cycleId}`);
 }
+
+export interface SettlementCycleBillsResponse {
+  cycle: {
+    id: string;
+    cycle_start: string;
+    cycle_end: string;
+    status: 'pending' | 'overdue' | 'confirmed';
+    net_amount: number;
+    proof_image_url?: string | null;
+    proof_note?: string | null;
+    confirmed_at?: string | null;
+    confirmed_by?: {
+      id: string;
+      name: string;
+      emoji: string;
+    } | null;
+    other_user: {
+      id: string;
+      name: string;
+      emoji: string;
+      color?: string;
+    };
+  };
+  bills: Array<{
+    id: string;
+    title: string;
+    icon: string;
+    color: string;
+    description: string;
+    total_amount: number;
+    date: string;
+    payer_id: string;
+    payer_name: string;
+    payer_emoji: string;
+    settled: boolean;
+  }>;
+}
+
+export async function fetchSettlementCycleBills(cycleId: string): Promise<SettlementCycleBillsResponse> {
+  return await api.get<SettlementCycleBillsResponse>(`/api/settlements/${cycleId}/bills`);
+}

@@ -34,6 +34,8 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
   const { tags } = useTags()
   const [manualPaid, setManualPaid] = useState<Set<string>>(bill._manualPaidUserIds || new Set())
   const [showPaySheet, setShowPaySheet] = useState(false)
+  const [showSettlementAudit, setShowSettlementAudit] = useState(false)
+  const [previewProofImage, setPreviewProofImage] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isPayer = bill.payer_id === currentUserId
   const { protestBill } = useAngerStorm()
@@ -220,7 +222,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
 
   if (bill.settled) {
     bannerClass = 'paid'
-    bannerText = '✓ 已结清'
+    bannerText = bill._settlement ? '✓ 已通过每周清账结清' : '✓ 已结清'
     bannerAmount = isPayer ? collectTotal : (memberShares[currentUserId] || 0)
   } else if (dispute) {
     bannerClass = 'dispute'
@@ -274,6 +276,60 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                 <span>{bannerText}</span>
                 <span className="role-amount">{fmtMoney(bannerAmount)}</span>
               </div>
+
+              {/* Weekly Settlement Audit Pill */}
+              {bill._settlement && (
+                <div
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(10,132,255,0.08), rgba(99,102,241,0.08))',
+                    border: '1px solid rgba(10,132,255,0.22)',
+                    borderRadius: 12,
+                    padding: '10px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    boxSizing: 'border-box',
+                  }}
+                  onClick={() => setShowSettlementAudit(true)}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 18 }}>🗓️</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label)' }}>
+                        已由每周清账涵盖并结清
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: 'var(--label2)',
+                          marginTop: 2,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        周期 {bill._settlement.cycle_start} ~ {bill._settlement.cycle_end} · 结清人：{bill._settlement.confirmed_by.name}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      color: 'var(--blue)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      flexShrink: 0,
+                      marginLeft: 8,
+                    }}
+                  >
+                    <span>查验凭证</span>
+                    <span style={{ fontSize: 14 }}>›</span>
+                  </div>
+                </div>
+              )}
 
               {/* Dispute review - visible to all members */}
               {dispute && (
@@ -549,6 +605,213 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
             </button>
           </div>
         </BottomSheet>
+      )}
+
+      {showSettlementAudit && bill._settlement && (
+        <BottomSheet onClose={() => setShowSettlementAudit(false)} title="每周清账审计存证">
+          <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {/* Status Card */}
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(48,209,88,0.12), rgba(10,132,255,0.08))',
+                border: '1px solid rgba(48,209,88,0.25)',
+                borderRadius: 14,
+                padding: '14px 16px',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: 26, marginBottom: 4 }}>🧾 ➔ 🗓️</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--label)' }}>
+                本账单已在每周清账中结清归档
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--label2)', marginTop: 4 }}>
+                结清证明已留档存证，不可重复扣款或结算
+              </div>
+            </div>
+
+            {/* Info Grid */}
+            <div
+              style={{
+                background: 'var(--bg2)',
+                borderRadius: 14,
+                border: '1px solid var(--sep)',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  borderBottom: '1px solid var(--sep)',
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ color: 'var(--label2)' }}>结清周期</span>
+                <span style={{ fontWeight: 600, color: 'var(--label)' }}>
+                  {bill._settlement.cycle_start} ~ {bill._settlement.cycle_end}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  borderBottom: '1px solid var(--sep)',
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ color: 'var(--label2)' }}>结清生效时间</span>
+                <span style={{ fontWeight: 600, color: 'var(--label)' }}>
+                  {new Date(bill._settlement.confirmed_at).toLocaleString('zh-CN')}
+                </span>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px',
+                  borderBottom: bill._settlement.proof_note ? '1px solid var(--sep)' : 'none',
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ color: 'var(--label2)' }}>确认人</span>
+                <span style={{ fontWeight: 600, color: 'var(--label)' }}>
+                  {bill._settlement.confirmed_by.emoji} {bill._settlement.confirmed_by.name}
+                </span>
+              </div>
+              {bill._settlement.proof_note && (
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    padding: '12px 14px',
+                    fontSize: 13,
+                  }}
+                >
+                  <span style={{ color: 'var(--label2)' }}>转账备注</span>
+                  <span style={{ fontWeight: 600, color: 'var(--label)' }}>
+                    {bill._settlement.proof_note}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Proof Image */}
+            {bill._settlement.proof_image_url ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)' }}>
+                  周结算付款凭证截图
+                </div>
+                <div
+                  onClick={() => setPreviewProofImage(bill._settlement!.proof_image_url!)}
+                  style={{
+                    borderRadius: 14,
+                    overflow: 'hidden',
+                    border: '1px solid var(--sep)',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    background: '#000',
+                  }}
+                >
+                  <img
+                    src={bill._settlement.proof_image_url}
+                    alt="周清账付款凭证"
+                    style={{
+                      width: '100%',
+                      maxHeight: 220,
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      bottom: 8,
+                      right: 8,
+                      background: 'rgba(0,0,0,0.65)',
+                      color: '#fff',
+                      fontSize: 11,
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                    }}
+                  >
+                    🔍 点击放大
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  background: 'var(--bg3)',
+                  padding: '12px',
+                  borderRadius: 10,
+                  fontSize: 12,
+                  color: 'var(--label3)',
+                  textAlign: 'center',
+                }}
+              >
+                未附带图片凭证
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowSettlementAudit(false)}
+              style={{
+                width: '100%',
+                padding: '12px 0',
+                borderRadius: 12,
+                border: 'none',
+                background: 'var(--bg3)',
+                color: 'var(--label)',
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              我知道了
+            </button>
+          </div>
+        </BottomSheet>
+      )}
+
+      {/* Proof Full Image Modal */}
+      {previewProofImage && (
+        <div
+          onClick={() => setPreviewProofImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.88)',
+            zIndex: 999999,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <img
+            src={previewProofImage}
+            alt="凭证大图"
+            style={{ maxWidth: '95%', maxHeight: '85vh', objectFit: 'contain', borderRadius: 8 }}
+          />
+          <button
+            onClick={() => setPreviewProofImage(null)}
+            style={{
+              marginTop: 14,
+              padding: '8px 24px',
+              borderRadius: 20,
+              background: 'rgba(255,255,255,0.2)',
+              color: '#fff',
+              border: 'none',
+              fontSize: 14,
+              cursor: 'pointer',
+            }}
+          >
+            关闭
+          </button>
+        </div>
       )}
     </>
   )

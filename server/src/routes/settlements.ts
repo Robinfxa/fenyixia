@@ -445,7 +445,9 @@ settlementsRoute.post('/:id/confirm', async (c) => {
 
       const allMembersSettled = nonPayerMembers.every((m) => paidUserSet.has(m.user_id));
       if (allMembersSettled && nonPayerMembers.length > 0) {
-        await tx.run('UPDATE bills SET settled = true WHERE id = ?', billId);
+        await tx.run('UPDATE bills SET settled = true, settlement_cycle_id = ? WHERE id = ?', cycleId, billId);
+      } else {
+        await tx.run('UPDATE bills SET settlement_cycle_id = ? WHERE id = ?', cycleId, billId);
       }
     }
 
@@ -474,6 +476,113 @@ settlementsRoute.post('/:id/confirm', async (c) => {
     message: '清帐成功，付款凭证已归档，账目已同步更新',
     cleared_bills_count: billsToClear.length,
     proof_image_url: proofImageUrl.trim(),
+  });
+});
+
+// GET /api/settlements/:id/bills - Get detailed breakdown of all bills covered by a settlement cycle
+settlementsRoute.get('/:id/bills', async (c) => {
+  const user = c.get('user');
+  const cycleId = c.req.param('id');
+
+  const cycle = await db.queryOne<any>(
+    `SELECT sc.*,
+            u.name as other_name, u.emoji as other_emoji, u.color as other_color,
+            cb.name as confirmed_by_name, cb.emoji as confirmed_by_emoji
+     FROM settlement_cycles sc
+     JOIN users u ON u.id = (CASE WHEN sc.user_id = ? THEN sc.friend_id ELSE sc.user_id END)
+     LEFT JOIN users cb ON cb.id = sc.confirmed_by
+     WHERE sc.id = ? AND (sc.user_id = ? OR sc.friend_id = ?)`,
+    user.id, cycleId, user.id, user.id
+  );
+
+  if (!cycle) {
+    return c.json({ error: '结算单不存在' }, 404);
+  }
+
+  let billIds: string[] = [];
+  try {
+    billIds = JSON.parse(cycle.settled_bill_ids || '[]');
+  } catch {}
+
+  // Fallback to bills where settlement_cycle_id matches
+  if (!Array.isArray(billIds) || billIds.length === 0) {
+    const bRows = await db.query<{ id: string }>('SELECT id FROM bills WHERE settlement_cycle_id = ?', cycleId);
+    billIds = bRows.map(r => r.id);
+  }
+
+  if (billIds.length === 0) {
+    return c.json({
+      cycle: {
+        id: cycle.id,
+        cycle_start: cycle.cycle_start,
+        cycle_end: cycle.cycle_end,
+        status: cycle.status,
+        net_amount: Number(cycle.net_amount),
+        proof_image_url: cycle.proof_image_url || null,
+        proof_note: cycle.proof_note || null,
+        confirmed_at: cycle.confirmed_at,
+        confirmed_by: {
+          id: cycle.confirmed_by,
+          name: cycle.confirmed_by_name || '用户',
+          emoji: cycle.confirmed_by_emoji || '👤',
+        },
+        other_user: {
+          id: cycle.user_id === user.id ? cycle.friend_id : cycle.user_id,
+          name: cycle.other_name,
+          emoji: cycle.other_emoji,
+          color: cycle.other_color,
+        },
+      },
+      bills: [],
+    });
+  }
+
+  const placeholders = billIds.map(() => '?').join(',');
+  const billRows = await db.query<any>(
+    `SELECT b.id, b.title, b.icon, b.description, b.total_amount, b.date, b.payer_id, b.settled, b.color,
+            u.name as payer_name, u.emoji as payer_emoji
+     FROM bills b
+     JOIN users u ON u.id = b.payer_id
+     WHERE b.id IN (${placeholders})
+     ORDER BY b.date DESC`,
+    ...billIds
+  );
+
+  return c.json({
+    cycle: {
+      id: cycle.id,
+      cycle_start: cycle.cycle_start,
+      cycle_end: cycle.cycle_end,
+      status: cycle.status,
+      net_amount: Number(cycle.net_amount),
+      proof_image_url: cycle.proof_image_url || null,
+      proof_note: cycle.proof_note || null,
+      confirmed_at: cycle.confirmed_at,
+      confirmed_by: {
+        id: cycle.confirmed_by,
+        name: cycle.confirmed_by_name || '用户',
+        emoji: cycle.confirmed_by_emoji || '👤',
+      },
+      other_user: {
+        id: cycle.user_id === user.id ? cycle.friend_id : cycle.user_id,
+        name: cycle.other_name,
+        emoji: cycle.other_emoji,
+        color: cycle.other_color,
+      },
+    },
+    bills: billRows.map((b) => ({
+      id: b.id,
+      title: b.title,
+      icon: b.icon || '🧾',
+      color: b.color || '#4F46E5',
+      description: b.description || '',
+      total_amount: Number(b.total_amount),
+      date: b.date,
+      payer_id: b.payer_id,
+      payer_name: b.payer_name,
+      payer_emoji: b.payer_emoji,
+      settled: Boolean(b.settled),
+    })),
   });
 });
 
