@@ -20,6 +20,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
   const [torchOn, setTorchOn] = useState(false)
   const [torchSupported, setTorchSupported] = useState(false)
   const [capturing, setCapturing] = useState(false)
+  const [flash, setFlash] = useState(false)
 
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -49,6 +50,20 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
       onMultiLoaded(entries)
     }
   }, [onImageLoaded, onMultiLoaded])
+
+  // 监听剪贴板粘贴截图
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = Array.from(e.clipboardData?.items || [])
+      const imgItem = items.find(it => it.type.startsWith('image/'))
+      if (imgItem) {
+        const file = imgItem.getAsFile()
+        if (file) handleFiles([file])
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [handleFiles])
 
   const stopCameraTracks = (s: MediaStream | null) => {
     if (s) {
@@ -162,10 +177,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
   useEffect(() => {
     let unmounted = false
 
-    // 直接启动相机
-    startCamera(false).catch(() => {
-      // 若受限则静默等待用户轻触画面
-    })
+    startCamera(false).catch(() => {})
 
     return () => {
       unmounted = true
@@ -203,37 +215,52 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
   const handleShutter = async () => {
     if (capturing) return
 
-    // 如果实时取景流已开启且画面正常，直接截取视频高清画幅
+    // 触觉与视觉快门闪光反馈
+    try {
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate?.(40)
+      }
+    } catch {}
+    setFlash(true)
+    setTimeout(() => setFlash(false), 200)
+
     const video = videoRef.current
-    if (cameraActive && video && video.videoWidth > 0 && video.videoHeight > 0) {
-      setCapturing(true)
-      try {
-        const canvas = document.createElement('canvas')
-        canvas.width = video.videoWidth
-        canvas.height = video.videoHeight
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
-          canvas.toBlob(blob => {
-            if (blob) {
-              const file = new File([blob], `receipt_${Date.now()}.jpg`, { type: 'image/jpeg' })
-              const img = new Image()
-              img.onload = () => {
-                if (stream) {
-                  stopCameraTracks(stream)
+    if (cameraActive && video) {
+      // 若处于播放状态但首帧尚未就绪，短暂延迟80ms读取帧
+      if (video.videoWidth === 0 && !video.paused) {
+        await new Promise(r => setTimeout(r, 80))
+      }
+
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setCapturing(true)
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+          const ctx = canvas.getContext('2d')
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.88)
+            canvas.toBlob(blob => {
+              if (blob) {
+                const file = new File([blob], `receipt_${Date.now()}.jpg`, { type: 'image/jpeg' })
+                const img = new Image()
+                img.onload = () => {
+                  if (stream) {
+                    stopCameraTracks(stream)
+                  }
+                  onImageLoaded(file, img, dataUrl)
                 }
-                onImageLoaded(file, img, dataUrl)
+                img.src = dataUrl
               }
-              img.src = dataUrl
-            }
-          }, 'image/jpeg', 0.88)
-          return
+            }, 'image/jpeg', 0.88)
+            return
+          }
+        } catch (e) {
+          console.error('[Camera] Video capture frame failed:', e)
+        } finally {
+          setCapturing(false)
         }
-      } catch (e) {
-        console.error('[Camera] Video capture frame failed:', e)
-      } finally {
-        setCapturing(false)
       }
     }
 
@@ -253,6 +280,29 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
     }
   }
 
+  // 从剪贴板直接读取小票截图
+  const handlePasteClipboard = async () => {
+    try {
+      if (!navigator.clipboard?.read) {
+        alert('可直接在屏幕任意处长按或快捷键粘贴小票截图')
+        return
+      }
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const imageType = item.types.find(t => t.startsWith('image/'))
+        if (imageType) {
+          const blob = await item.getType(imageType)
+          const file = new File([blob], `clipboard_${Date.now()}.png`, { type: imageType })
+          handleFiles([file])
+          return
+        }
+      }
+      alert('剪贴板中未找到图片，请先在手机截屏或复制小票')
+    } catch {
+      alert('无法访问剪贴板，可使用下方相册选择')
+    }
+  }
+
   return (
     <div
       className="scanner-camera-container"
@@ -262,7 +312,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         handleFiles(Array.from(e.dataTransfer.files))
       }}
     >
-      {/* 原生相机专属输入框（单选、capture="environment"，绝不带 multiple，备用硬唤起系统相机） */}
+      {/* 原生相机专属输入框（单选、capture="environment"，备用硬唤起系统相机） */}
       <input
         ref={cameraInputRef}
         type="file"
@@ -277,11 +327,11 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
         }}
       />
 
-      {/* 原生相册专属输入框（单选、绝不带 capture、绝不带 multiple！防止 Android 唤起 DocumentsUI 文件管理器） */}
+      {/* 原生相册专属输入框（兼顾主流 MIME 格式与扩展名，单选，绝不带 capture 与 multiple） */}
       <input
         ref={albumInputRef}
         type="file"
-        accept="image/*"
+        accept="image/jpeg,image/png,image/webp,image/jpg,image/*"
         style={{ display: 'none' }}
         onChange={e => {
           const files = Array.from(e.target.files || [])
@@ -293,6 +343,9 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
 
       {/* 取景器主体（视频标签常驻 DOM，确保 iOS / Android 流无缝挂载） */}
       <div className="scanner-viewfinder">
+        {/* 快门闪白动画 */}
+        {flash && <div className="scanner-flash-overlay" />}
+
         <video
           ref={videoRef}
           autoPlay
@@ -343,7 +396,7 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
                 <div className="scanner-corner bl" />
                 <div className="scanner-corner br" />
               </div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)' }}>
+              <div style={{ fontSize: 12, color: '#ffffff', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
                 点击下方白色圆形按钮直接拍照
               </div>
             </div>
@@ -407,30 +460,63 @@ export default function ImageUploader({ type, onImageLoaded, onMultiLoaded }: Im
 
       {/* 控制区域：拍照快门与下方相册提取按钮 */}
       <div className="scanner-shutter-wrap">
+        {/* 快门主按钮：纯白实体外圈与高对比度内芯，确保100%绝对可见 */}
         <button
           type="button"
           className="scanner-shutter-outer"
           onClick={handleShutter}
           disabled={capturing}
           aria-label="拍照"
-          style={{ opacity: capturing ? 0.6 : 1 }}
+          style={{
+            border: '4px solid #ffffff',
+            background: 'rgba(255, 255, 255, 0.25)',
+            opacity: capturing ? 0.6 : 1,
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.45)',
+          }}
         >
-          <div className="scanner-shutter-inner" />
+          <div
+            className="scanner-shutter-inner"
+            style={{
+              background: '#ffffff',
+            }}
+          />
         </button>
 
-        {/* 关键需求：下方放置清晰的相册提取按钮，直达系统相册 */}
-        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-          <button
-            type="button"
-            className="scanner-album-btn"
-            onClick={handleOpenAlbum}
-          >
-            <span style={{ fontSize: 17 }}>🖼️</span>
-            <span>从相册选择小票 / 截图</span>
-          </button>
-          <span style={{ fontSize: 11, color: 'var(--label3)', letterSpacing: '0.2px' }}>
-            点开直达照片图库（如遇系统弹窗请选择「相册」或「图库」）
-          </span>
+        {/* 关键需求：下方放置清晰的相册提取按钮与粘贴截图按钮 */}
+        <div style={{ width: '100%', maxWidth: 340, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+            <button
+              type="button"
+              className="scanner-album-btn"
+              onClick={handleOpenAlbum}
+              style={{ flex: 1 }}
+            >
+              <span style={{ fontSize: 17 }}>🖼️</span>
+              <span>从相册选择小票</span>
+            </button>
+            <button
+              type="button"
+              className="scanner-album-btn"
+              onClick={handlePasteClipboard}
+              style={{ width: 'auto', padding: '12px 14px', flexShrink: 0 }}
+              title="读取剪贴板中刚截的小票图"
+            >
+              <span>📋 粘贴截图</span>
+            </button>
+          </div>
+
+          <div style={{
+            fontSize: 11,
+            color: 'var(--label2)',
+            lineHeight: 1.4,
+            textAlign: 'center',
+            background: 'rgba(255,255,255,0.06)',
+            padding: '4px 12px',
+            borderRadius: 8,
+            width: '100%',
+          }}>
+            💡 安卓提示：若打开系统文件页面，可点左上角 <b>☰ 菜单</b> 或上方<b>「图片」</b>直达相册
+          </div>
         </div>
       </div>
     </div>
