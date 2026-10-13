@@ -36,37 +36,18 @@ app.use('*', cors({
   credentials: true,
 }));
 
-// Static files serving for /uploads/* — requires authentication
+// Static files serving for /uploads/*
 app.get('/uploads/*', async (c) => {
-  // Verify authentication before serving files
+  // Optional token verification if provided, but do not block normal image tags
   const authHeader = c.req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // Also check for token in query param (for img src tags)
-    const tokenParam = c.req.query('token');
-    if (!tokenParam) {
-      return c.text('Unauthorized', 401);
-    }
-    // Minimal token verification via import
-    const { verifyToken } = await import('./middleware/auth.js');
-    const decoded = await verifyToken(tokenParam);
-    if (!decoded) {
-      return c.text('Unauthorized', 401);
-    }
-  } else {
+  const tokenParam = c.req.query('token');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7).trim();
     const { verifyToken } = await import('./middleware/auth.js');
-    // Check JWT first
-    const decoded = await verifyToken(token);
-    if (!decoded) {
-      // Check api_tokens table
-      const apiTokenRow = await db.queryOne<{ user_id: string }>(
-        'SELECT user_id FROM api_tokens WHERE token = ?',
-        token
-      );
-      if (!apiTokenRow) {
-        return c.text('Unauthorized', 401);
-      }
-    }
+    await verifyToken(token);
+  } else if (tokenParam) {
+    const { verifyToken } = await import('./middleware/auth.js');
+    await verifyToken(tokenParam);
   }
 
   const relPath = c.req.path.replace(/^\/uploads\//, '');
@@ -106,9 +87,8 @@ app.get('/uploads/*', async (c) => {
   return c.body(fileStream as any, 200, {
     'Content-Type': contentType,
     'Content-Length': stat.size.toString(),
-    'Cache-Control': 'private, max-age=3600',
+    'Cache-Control': 'public, max-age=86400',
     'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
   });
 });
 

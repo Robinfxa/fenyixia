@@ -16,6 +16,7 @@ import { useToast } from '../contexts/ToastContext';
 import { fmtMoney } from '../lib/utils';
 import BottomNav from '../components/Layout/BottomNav';
 import BottomSheet from '../components/shared/BottomSheet';
+import ImageViewer from '../components/shared/ImageViewer';
 import SplitDetail from '../components/SplitDetail/SplitDetail';
 import type { Bill } from '../lib/types';
 
@@ -840,15 +841,38 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
             />
 
             {proofPreviewUrl ? (
-              <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--sep)' }}>
+              <div
+                style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: '1px solid var(--sep)', cursor: 'pointer' }}
+                onClick={() => setViewProofUrl(proofPreviewUrl)}
+              >
                 <img
                   src={proofPreviewUrl}
                   alt="凭证预览"
-                  style={{ width: '100%', maxHeight: 220, objectFit: 'contain', background: '#000' }}
+                  style={{ width: '100%', maxHeight: 220, objectFit: 'contain', background: '#000', display: 'block' }}
                 />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 10,
+                    left: 10,
+                    background: 'rgba(0,0,0,0.65)',
+                    color: '#fff',
+                    borderRadius: 6,
+                    padding: '4px 8px',
+                    fontSize: 11,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  🔍 点击放大预览
+                </div>
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
                   style={{
                     position: 'absolute',
                     bottom: 10,
@@ -1132,43 +1156,11 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
       )}
 
       {/* ── 4. Fullscreen Proof Image Viewer ── */}
-      {Boolean(viewProofUrl) && (
-        <div
-          onClick={() => setViewProofUrl(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.85)',
-            zIndex: 99999,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <img
-            src={viewProofUrl!}
-            alt="付款截图"
-            style={{ maxWidth: '95%', maxHeight: '85vh', objectFit: 'contain', borderRadius: 8 }}
-          />
-          <button
-            onClick={() => setViewProofUrl(null)}
-            style={{
-              marginTop: 14,
-              padding: '8px 24px',
-              borderRadius: 20,
-              background: 'rgba(255,255,255,0.2)',
-              color: '#fff',
-              border: 'none',
-              fontSize: 14,
-              cursor: 'pointer',
-            }}
-          >
-            关闭预览
-          </button>
-        </div>
-      )}
+      <ImageViewer
+        src={viewProofUrl}
+        title="付款凭证大图"
+        onClose={() => setViewProofUrl(null)}
+      />
 
       <BottomNav onAddClick={onAddClick} />
     </div>

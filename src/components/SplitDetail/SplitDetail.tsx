@@ -12,6 +12,7 @@ import { useToast } from '../../contexts/ToastContext'
 import BillSheet from './BillSheet'
 import DisputeSheet from './DisputeSheet'
 import BottomSheet from '../shared/BottomSheet'
+import ImageViewer from '../shared/ImageViewer'
 
 interface SplitDetailProps {
   bill: Bill
@@ -506,16 +507,54 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                 <div className="proof-section" style={{ marginTop: 8 }}>
                   <div className="proof-section-title">已上传凭证 ({proofs.length})</div>
                   {proofs.map(p => (
-                    <div key={p.id} className="proof-item">
-                      <img
-                        className="proof-thumb"
-                        src={p.image_url}
-                        alt="凭证"
-                        onClick={() => window.open(p.image_url, '_blank')}
-                      />
-                      <div>
-                        <div>{p.user?.emoji} {p.user?.name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--label3)' }}>
+                    <div
+                      key={p.id}
+                      className="proof-item tappable"
+                      style={{ cursor: 'pointer', padding: '8px 4px' }}
+                      onClick={() => setPreviewProofImage(p.image_url)}
+                    >
+                      <div
+                        style={{
+                          position: 'relative',
+                          width: 48,
+                          height: 48,
+                          flexShrink: 0,
+                          borderRadius: 8,
+                          overflow: 'hidden',
+                          border: '1px solid var(--sep)',
+                          background: 'var(--bg3)',
+                        }}
+                      >
+                        <img
+                          className="proof-thumb"
+                          src={p.image_url}
+                          alt="凭证"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: 2,
+                            right: 2,
+                            background: 'rgba(0,0,0,0.65)',
+                            color: '#fff',
+                            borderRadius: 4,
+                            padding: '1px 3px',
+                            fontSize: 9,
+                            lineHeight: 1,
+                          }}
+                        >
+                          🔍
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0, marginLeft: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13 }}>{p.user?.emoji} {p.user?.name}</div>
+                          <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 500 }}>
+                            点击查看大图
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 3 }}>
                           {new Date(p.created_at).toLocaleString('zh-CN')}
                         </div>
                       </div>
@@ -776,43 +815,11 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
       )}
 
       {/* Proof Full Image Modal */}
-      {previewProofImage && (
-        <div
-          onClick={() => setPreviewProofImage(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0, 0, 0, 0.88)',
-            zIndex: 999999,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-        >
-          <img
-            src={previewProofImage}
-            alt="凭证大图"
-            style={{ maxWidth: '95%', maxHeight: '85vh', objectFit: 'contain', borderRadius: 8 }}
-          />
-          <button
-            onClick={() => setPreviewProofImage(null)}
-            style={{
-              marginTop: 14,
-              padding: '8px 24px',
-              borderRadius: 20,
-              background: 'rgba(255,255,255,0.2)',
-              color: '#fff',
-              border: 'none',
-              fontSize: 14,
-              cursor: 'pointer',
-            }}
-          >
-            关闭
-          </button>
-        </div>
-      )}
+      <ImageViewer
+        src={previewProofImage}
+        title="付款凭证大图"
+        onClose={() => setPreviewProofImage(null)}
+      />
     </>
   )
 }
