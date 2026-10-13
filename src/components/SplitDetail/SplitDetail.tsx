@@ -476,22 +476,107 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               {/* Payment proof section */}
               {!isPayer && !bill.settled && (
                 <div className="proof-section">
-                  <div className="proof-section-title">付款凭证</div>
-                  <div
-                    className="proof-upload-area"
-                    onClick={() => fileInputRef.current?.click()}
-                    onPaste={e => {
-                      const items = Array.from(e.clipboardData.items)
-                      const imageItem = items.find(i => i.type.startsWith('image/'))
-                      if (imageItem) { e.preventDefault(); const b = imageItem.getAsFile(); if (b) doUploadBlob(b) }
-                    }}
-                    tabIndex={0}
-                  >
-                    {uploading
-                      ? '上传中...'
-                      : <><div>📷 点击选择文件</div><div className="proof-upload-hint">或直接 Ctrl+V 粘贴截图</div></>
+                  <div className="proof-section-title">我的付款凭证</div>
+                  {(() => {
+                    const myProof = proofs.find(p => p.user_id === currentUserId)
+                    if (myProof) {
+                      return (
+                        <div
+                          style={{
+                            background: 'var(--bg2)',
+                            borderRadius: 14,
+                            border: '1px solid var(--sep)',
+                            padding: 12,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 10,
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span>✓</span> 已上传付款凭证
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => fileInputRef.current?.click()}
+                              disabled={uploading}
+                              style={{
+                                background: 'var(--bg3)',
+                                border: '1px solid var(--sep)',
+                                borderRadius: 8,
+                                padding: '4px 10px',
+                                fontSize: 12,
+                                color: 'var(--label2)',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {uploading ? '上传中...' : '更换凭证'}
+                            </button>
+                          </div>
+                          {/* Prominent readable thumbnail */}
+                          <div
+                            onClick={() => setPreviewProofImage(myProof.image_url)}
+                            style={{
+                              position: 'relative',
+                              width: '100%',
+                              height: 140,
+                              borderRadius: 10,
+                              overflow: 'hidden',
+                              border: '1px solid var(--sep)',
+                              background: 'var(--bg3)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <img
+                              src={myProof.image_url}
+                              alt="我的付款凭证缩略图"
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'contain',
+                                display: 'block',
+                              }}
+                            />
+                            <div
+                              style={{
+                                position: 'absolute',
+                                bottom: 8,
+                                right: 8,
+                                background: 'rgba(0,0,0,0.65)',
+                                color: '#fff',
+                                borderRadius: 6,
+                                padding: '3px 8px',
+                                fontSize: 11,
+                                fontWeight: 500,
+                              }}
+                            >
+                              🔍 点击弹出小窗口
+                            </div>
+                          </div>
+                        </div>
+                      )
                     }
-                  </div>
+                    return (
+                      <div
+                        className="proof-upload-area"
+                        onClick={() => fileInputRef.current?.click()}
+                        onPaste={e => {
+                          const items = Array.from(e.clipboardData.items)
+                          const imageItem = items.find(i => i.type.startsWith('image/'))
+                          if (imageItem) { e.preventDefault(); const b = imageItem.getAsFile(); if (b) doUploadBlob(b) }
+                        }}
+                        tabIndex={0}
+                      >
+                        {uploading
+                          ? '上传中...'
+                          : <><div>📷 点击选择文件</div><div className="proof-upload-hint">或直接 Ctrl+V 粘贴截图</div></>
+                        }
+                      </div>
+                    )
+                  })()}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -504,62 +589,86 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
 
               {/* Existing proofs */}
               {proofs.length > 0 && (
-                <div className="proof-section" style={{ marginTop: 8 }}>
+                <div className="proof-section" style={{ marginTop: 12 }}>
                   <div className="proof-section-title">已上传凭证 ({proofs.length})</div>
-                  {proofs.map(p => (
-                    <div
-                      key={p.id}
-                      className="proof-item tappable"
-                      style={{ cursor: 'pointer', padding: '8px 4px' }}
-                      onClick={() => setPreviewProofImage(p.image_url)}
-                    >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {proofs.map(p => (
                       <div
+                        key={p.id}
+                        className="proof-item tappable"
                         style={{
-                          position: 'relative',
-                          width: 48,
-                          height: 48,
-                          flexShrink: 0,
-                          borderRadius: 8,
-                          overflow: 'hidden',
+                          cursor: 'pointer',
+                          padding: '10px 12px',
+                          background: 'var(--bg2)',
+                          borderRadius: 12,
                           border: '1px solid var(--sep)',
-                          background: 'var(--bg3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
                         }}
+                        onClick={() => setPreviewProofImage(p.image_url)}
                       >
-                        <img
-                          className="proof-thumb"
-                          src={p.image_url}
-                          alt="凭证"
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                        />
+                        {/* Clear, readable thumbnail */}
                         <div
                           style={{
-                            position: 'absolute',
-                            bottom: 2,
-                            right: 2,
-                            background: 'rgba(0,0,0,0.65)',
-                            color: '#fff',
-                            borderRadius: 4,
-                            padding: '1px 3px',
-                            fontSize: 9,
-                            lineHeight: 1,
+                            position: 'relative',
+                            width: 68,
+                            height: 76,
+                            flexShrink: 0,
+                            borderRadius: 10,
+                            overflow: 'hidden',
+                            border: '1px solid var(--sep)',
+                            background: 'var(--bg3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                           }}
                         >
-                          🔍
+                          <img
+                            className="proof-thumb"
+                            src={p.image_url}
+                            alt="凭证缩略图"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                          />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: 3,
+                              right: 3,
+                              background: 'rgba(0,0,0,0.65)',
+                              color: '#fff',
+                              borderRadius: 4,
+                              padding: '1px 4px',
+                              fontSize: 9,
+                              lineHeight: 1.2,
+                            }}
+                          >
+                            🔍
+                          </div>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div style={{ fontWeight: 600, fontSize: 14 }}>{p.user?.emoji} {p.user?.name}</div>
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: 'var(--blue)',
+                                background: 'rgba(10, 132, 255, 0.08)',
+                                padding: '2px 8px',
+                                borderRadius: 6,
+                                fontWeight: 600,
+                              }}
+                            >
+                              弹窗查看
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 4 }}>
+                            {new Date(p.created_at).toLocaleString('zh-CN')}
+                          </div>
                         </div>
                       </div>
-                      <div style={{ flex: 1, minWidth: 0, marginLeft: 10 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ fontWeight: 600, fontSize: 13 }}>{p.user?.emoji} {p.user?.name}</div>
-                          <span style={{ fontSize: 11, color: 'var(--blue)', fontWeight: 500 }}>
-                            点击查看大图
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 3 }}>
-                          {new Date(p.created_at).toLocaleString('zh-CN')}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
 

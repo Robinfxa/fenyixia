@@ -596,27 +596,50 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {c.proof_image_url && (
-                      <button
-                        type="button"
+                      <div
                         onClick={(e) => {
                           e.stopPropagation();
                           setViewProofUrl(c.proof_image_url || null);
                         }}
+                        title="点击跳出小窗口查看凭证"
                         style={{
-                          background: 'rgba(10, 132, 255, 0.1)',
-                          border: '1px solid rgba(10, 132, 255, 0.25)',
-                          color: 'var(--blue)',
+                          position: 'relative',
+                          width: 44,
+                          height: 44,
                           borderRadius: 8,
-                          padding: '3px 8px',
-                          fontSize: 11,
-                          fontWeight: 600,
+                          overflow: 'hidden',
+                          border: '1px solid var(--sep)',
+                          background: 'var(--bg3)',
                           cursor: 'pointer',
+                          flexShrink: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                         }}
                       >
-                        🖼️ 凭证
-                      </button>
+                        <img
+                          src={c.proof_image_url}
+                          alt="凭证缩略图"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: 1,
+                            right: 1,
+                            background: 'rgba(0,0,0,0.65)',
+                            color: '#fff',
+                            borderRadius: 3,
+                            padding: '1px 3px',
+                            fontSize: 8,
+                            lineHeight: 1,
+                          }}
+                        >
+                          🔍
+                        </div>
+                      </div>
                     )}
                     <span style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 600, display: 'flex', alignItems: 'center' }}>
                       明细 ›
@@ -865,7 +888,7 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
                     gap: 4,
                   }}
                 >
-                  🔍 点击放大预览
+                  🔍 点击弹出小窗口
                 </div>
                 <button
                   type="button"
@@ -1027,28 +1050,52 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
                   </div>
 
                   {archiveData.cycle.proof_image_url && (
-                    <div style={{ marginTop: 10 }}>
-                      <button
-                        type="button"
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--label2)', marginBottom: 6 }}>
+                        结清付款凭证
+                      </div>
+                      <div
                         onClick={() => setViewProofUrl(archiveData.cycle.proof_image_url || null)}
                         style={{
+                          position: 'relative',
                           width: '100%',
-                          padding: '8px 0',
-                          borderRadius: 10,
-                          border: '1px solid rgba(10,132,255,0.3)',
-                          background: 'rgba(10,132,255,0.08)',
-                          color: 'var(--blue)',
-                          fontSize: 13,
-                          fontWeight: 600,
+                          height: 140,
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          border: '1px solid var(--sep)',
+                          background: 'var(--bg3)',
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: 6,
                         }}
                       >
-                        🖼️ 查看该次周结清付款凭证大图
-                      </button>
+                        <img
+                          src={archiveData.cycle.proof_image_url}
+                          alt="结清付款凭证缩略图"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'contain',
+                            display: 'block',
+                          }}
+                        />
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: 8,
+                            right: 8,
+                            background: 'rgba(0,0,0,0.65)',
+                            color: '#fff',
+                            borderRadius: 6,
+                            padding: '3px 8px',
+                            fontSize: 11,
+                            fontWeight: 500,
+                          }}
+                        >
+                          🔍 点击弹出小窗口
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
