@@ -9,6 +9,8 @@ import { useFriends } from '../../hooks/useFriends'
 import { useGroups } from '../../hooks/useGroups'
 import { useTags } from '../../hooks/useTags'
 import { useToast } from '../../contexts/ToastContext'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { fetchSettlementCycleBills, SettlementCycleBillsResponse } from '../../lib/api/settlements'
 import BillSheet from './BillSheet'
 import DisputeSheet from './DisputeSheet'
 import BottomSheet from '../shared/BottomSheet'
@@ -37,6 +39,35 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
   const [showPaySheet, setShowPaySheet] = useState(false)
   const [showSettlementAudit, setShowSettlementAudit] = useState(false)
   const [previewProofImage, setPreviewProofImage] = useState<string | null>(null)
+  const [settlementCycleData, setSettlementCycleData] = useState<SettlementCycleBillsResponse | null>(null)
+  const [settlementLoading, setSettlementLoading] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const handleOpenSettlementAudit = async () => {
+    setShowSettlementAudit(true)
+    if (bill._settlement?.cycle_id && (!settlementCycleData || settlementCycleData.cycle.id !== bill._settlement.cycle_id)) {
+      setSettlementLoading(true)
+      try {
+        const res = await fetchSettlementCycleBills(bill._settlement.cycle_id)
+        setSettlementCycleData(res)
+      } catch (err) {
+        console.error('Failed to load settlement cycle bills', err)
+      } finally {
+        setSettlementLoading(false)
+      }
+    }
+  }
+
+  const handleNavigateToSettlement = () => {
+    setShowSettlementAudit(false)
+    onClose()
+    if (location.pathname === '/settlements') {
+      showToast('已返回周结清中心')
+    } else {
+      navigate(`/settlements?cycleId=${bill._settlement?.cycle_id || ''}`)
+    }
+  }
   const fileInputRef = useRef<HTMLInputElement>(null)
   const isPayer = bill.payer_id === currentUserId
   const { protestBill } = useAngerStorm()
@@ -292,13 +323,13 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                     cursor: 'pointer',
                     boxSizing: 'border-box',
                   }}
-                  onClick={() => setShowSettlementAudit(true)}
+                  onClick={handleOpenSettlementAudit}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 18 }}>🗓️</span>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label)' }}>
-                        已由每周清账涵盖并结清
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
+                        本次结算已涵盖到周结算总账单
                       </div>
                       <div
                         style={{
@@ -326,7 +357,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                       marginLeft: 8,
                     }}
                   >
-                    <span>查验凭证</span>
+                    <span>查看周汇总明细</span>
                     <span style={{ fontSize: 14 }}>›</span>
                   </div>
                 </div>
@@ -756,7 +787,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
       )}
 
       {showSettlementAudit && bill._settlement && (
-        <BottomSheet onClose={() => setShowSettlementAudit(false)} title="每周清账审计存证">
+        <BottomSheet onClose={() => setShowSettlementAudit(false)} title="周结算汇总账单明细">
           <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Status Card */}
             <div
@@ -770,14 +801,132 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
             >
               <div style={{ fontSize: 26, marginBottom: 4 }}>🧾 ➔ 🗓️</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--label)' }}>
-                本账单已在每周清账中结清归档
+                本次结算已涵盖到周结算总账单
               </div>
               <div style={{ fontSize: 12, color: 'var(--label2)', marginTop: 4 }}>
-                结清证明已留档存证，不可重复扣款或结算
+                结清凭证已归档存证 · 涵盖多笔细分账单抵消对账
               </div>
             </div>
 
-            {/* Info Grid */}
+            {/* 1. Historical Settlement Snapshot Card (双方代付与抵消历史切片) */}
+            {settlementLoading ? (
+              <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--label3)', fontSize: 12 }}>
+                正在调取周结算对账数据...
+              </div>
+            ) : settlementCycleData?.snapshot ? (
+              <div
+                style={{
+                  background: 'var(--bg2)',
+                  border: '1px solid var(--sep)',
+                  borderRadius: 14,
+                  padding: '12px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>📊</span> 双方代付与抵消明细 (历史切片)
+                  </div>
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: 'var(--blue)',
+                      background: 'rgba(10, 132, 255, 0.1)',
+                      padding: '2px 7px',
+                      borderRadius: 6,
+                      fontWeight: 700,
+                    }}
+                  >
+                    已抵消对账
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: 8,
+                    background: 'var(--bg3)',
+                    padding: '10px',
+                    borderRadius: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--label2)' }}>
+                      👤 我代付 (对方应付)
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--label)', fontVariantNumeric: 'tabular-nums' }}>
+                      ¥{fmtMoney(settlementCycleData.snapshot.user_a_paid_for_b)}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div style={{ fontSize: 11, color: 'var(--label2)' }}>
+                      👤 {settlementCycleData.snapshot.user_b.name} 代付 (我应付)
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--label)', fontVariantNumeric: 'tabular-nums' }}>
+                      ¥{fmtMoney(settlementCycleData.snapshot.user_b_paid_for_a)}
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    background:
+                      settlementCycleData.snapshot.net_amount === 0
+                        ? 'rgba(142, 142, 147, 0.12)'
+                        : settlementCycleData.snapshot.debtor_id === currentUserId
+                        ? 'rgba(255, 149, 0, 0.12)'
+                        : 'rgba(48, 209, 88, 0.12)',
+                    border: `1px solid ${
+                      settlementCycleData.snapshot.net_amount === 0
+                        ? 'var(--sep)'
+                        : settlementCycleData.snapshot.debtor_id === currentUserId
+                        ? 'rgba(255, 149, 0, 0.3)'
+                        : 'rgba(48, 209, 88, 0.3)'
+                    }`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--label)' }}>
+                    {settlementCycleData.snapshot.net_amount === 0 ? (
+                      '⚖️ 双方代付完全抵消，互不欠款'
+                    ) : settlementCycleData.snapshot.debtor_id === currentUserId ? (
+                      <>
+                        我 向 <strong>{settlementCycleData.snapshot.creditor_name}</strong> 支付
+                      </>
+                    ) : (
+                      <>
+                        <strong>{settlementCycleData.snapshot.debtor_name}</strong> 向 我 支付
+                      </>
+                    )}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 16,
+                      fontWeight: 800,
+                      color:
+                        settlementCycleData.snapshot.net_amount === 0
+                          ? 'var(--label2)'
+                          : settlementCycleData.snapshot.debtor_id === currentUserId
+                          ? 'var(--orange)'
+                          : 'var(--green)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    ¥{fmtMoney(settlementCycleData.snapshot.net_amount)}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {/* 2. Basic Info Grid */}
             <div
               style={{
                 background: 'var(--bg2)',
@@ -790,7 +939,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
-                  padding: '12px 14px',
+                  padding: '11px 13px',
                   borderBottom: '1px solid var(--sep)',
                   fontSize: 13,
                 }}
@@ -804,7 +953,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
-                  padding: '12px 14px',
+                  padding: '11px 13px',
                   borderBottom: '1px solid var(--sep)',
                   fontSize: 13,
                 }}
@@ -818,7 +967,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
-                  padding: '12px 14px',
+                  padding: '11px 13px',
                   borderBottom: bill._settlement.proof_note ? '1px solid var(--sep)' : 'none',
                   fontSize: 13,
                 }}
@@ -833,7 +982,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
-                    padding: '12px 14px',
+                    padding: '11px 13px',
                     fontSize: 13,
                   }}
                 >
@@ -845,11 +994,11 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               )}
             </div>
 
-            {/* Proof Image */}
+            {/* 3. Proof Image (周结算总账单凭证) */}
             {bill._settlement.proof_image_url ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)' }}>
-                  周结算付款凭证截图
+                  周结算付款凭证（总账单）
                 </div>
                 <div
                   onClick={() => setPreviewProofImage(bill._settlement!.proof_image_url!)}
@@ -867,7 +1016,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                     alt="周清账付款凭证"
                     style={{
                       width: '100%',
-                      maxHeight: 220,
+                      maxHeight: 180,
                       objectFit: 'contain',
                       display: 'block',
                     }}
@@ -903,22 +1052,139 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               </div>
             )}
 
-            <button
-              onClick={() => setShowSettlementAudit(false)}
-              style={{
-                width: '100%',
-                padding: '12px 0',
-                borderRadius: 12,
-                border: 'none',
-                background: 'var(--bg3)',
-                color: 'var(--label)',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              我知道了
-            </button>
+            {/* 4. Bills list in this cycle (涵盖细分账单明细) */}
+            {settlementCycleData && settlementCycleData.bills.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
+                    本周期涵盖细分账单 ({settlementCycleData.bills.length} 笔)
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--label3)' }}>
+                    含本账单
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    maxHeight: '26vh',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {settlementCycleData.bills.map((b) => {
+                    const isCurrentBill = b.id === bill.id;
+                    return (
+                      <div
+                        key={b.id}
+                        style={{
+                          background: isCurrentBill ? 'rgba(10, 132, 255, 0.08)' : 'var(--bg2)',
+                          border: isCurrentBill ? '1px solid rgba(10, 132, 255, 0.35)' : '1px solid var(--sep)',
+                          borderRadius: 12,
+                          padding: '10px 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                          <span style={{ fontSize: 20 }}>{b.icon || '🧾'}</span>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  color: 'var(--label)',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                {b.title}
+                              </span>
+                              {isCurrentBill && (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    background: 'var(--blue)',
+                                    color: '#fff',
+                                    borderRadius: 4,
+                                    padding: '1px 5px',
+                                    fontWeight: 700,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  当前账单
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 2 }}>
+                              {b.date} · {b.payer_name} 垫付
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 700,
+                            color: 'var(--label)',
+                            fontVariantNumeric: 'tabular-nums',
+                            flexShrink: 0,
+                            marginLeft: 8,
+                          }}
+                        >
+                          ¥{fmtMoney(b.total_amount)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 5. Navigation & Close Action Buttons */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              <button
+                onClick={handleNavigateToSettlement}
+                style={{
+                  width: '100%',
+                  padding: '13px 0',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'var(--blue)',
+                  color: '#fff',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                <span>{location.pathname === '/settlements' ? '返回周清账账单列表' : '前往周清账中心完整查看 ›'}</span>
+              </button>
+
+              <button
+                onClick={() => setShowSettlementAudit(false)}
+                style={{
+                  width: '100%',
+                  padding: '11px 0',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'var(--bg3)',
+                  color: 'var(--label)',
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                我知道了
+              </button>
+            </div>
           </div>
         </BottomSheet>
       )}

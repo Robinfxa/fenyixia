@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useBills } from '../hooks/useBills';
 import { useSettlements } from '../hooks/useSettlements';
@@ -22,6 +22,9 @@ import type { Bill } from '../lib/types';
 
 export default function SettlementsPage({ onAddClick }: { onAddClick?: () => void }) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const cycleIdParam = searchParams.get('cycleId');
+  const handledCycleIdRef = useRef<string | null>(null);
   const { user } = useAuth();
   const { bills, reload: reloadBills } = useBills();
   const { showToast } = useToast();
@@ -112,6 +115,28 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
       setArchiveLoading(false);
     }
   };
+
+  // Handle closing archive details & clean URL param
+  const handleCloseArchive = () => {
+    setArchiveCycle(null);
+    setArchiveData(null);
+    if (searchParams.has('cycleId')) {
+      searchParams.delete('cycleId');
+      setSearchParams(searchParams, { replace: true });
+    }
+  };
+
+  // Auto-open archive sheet when cycleId is specified in URL query params
+  useEffect(() => {
+    if (!cycleIdParam || loading || cycles.length === 0) return;
+    if (handledCycleIdRef.current === cycleIdParam) return;
+
+    const targetCycle = cycles.find((c) => c.id === cycleIdParam);
+    if (targetCycle) {
+      handledCycleIdRef.current = cycleIdParam;
+      handleOpenArchive(targetCycle);
+    }
+  }, [cycleIdParam, cycles, loading]);
 
   // Select a bill from archive bills list to inspect via SplitDetail
   const handleSelectArchiveBill = (archiveBill: any) => {
@@ -987,7 +1012,7 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
       {/* ── 2.5. Settled Archive Bills Sheet (Traceability breakdown) ── */}
       {Boolean(archiveCycle) && (
         <BottomSheet
-          onClose={() => setArchiveCycle(null)}
+          onClose={handleCloseArchive}
           title={archiveCycle ? `已结清归档档案 · ${archiveCycle.other_user.name}` : '已结清明细'}
         >
           <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
