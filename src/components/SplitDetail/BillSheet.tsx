@@ -8,6 +8,7 @@ import { getFriendsByTag } from '../../lib/api/tags'
 import BottomSheet from '../shared/BottomSheet'
 import { useAuth } from '../../hooks/useAuth'
 import { useProfile } from '../../hooks/useProfile'
+import { useToast } from '../../contexts/ToastContext'
 
 const ICON_LIST = ['🍔', '🍕', '🍣', '🍜', '🧋', '☕', '🍰', '🎮', '🎬', '🛒',
     '✈️', '🏨', '⛽', '💊', '🎁', '🎪', '🎵', '🏋️', '🛁', '💡', '🧴', '🛵', '🚌', '🍻']
@@ -36,11 +37,14 @@ type DragPayload =
     | { type: 'self' }
 
 function itemToEdit(item: BillItem): EditItem {
+    const memberIds = (item.members || [])
+        .map(m => (m as any)?.id || (m as any)?.user?.id || (typeof m === 'string' ? m : ''))
+        .filter(Boolean)
     return {
-        name: item.name,
-        price: String(item.price),
+        name: item.name || '',
+        price: String(item.price ?? ''),
         qty: String(item.qty || 1),
-        memberIds: item.members.map(m => m.id),
+        memberIds,
     }
 }
 
@@ -133,8 +137,24 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
         return m
     }, [friends, groups, selfMember])
 
+    const { showToast } = useToast()
+
     const updateItem = (index: number, patch: Partial<EditItem>) =>
         setItems(prev => prev.map((it, i) => i === index ? { ...it, ...patch } : it))
+
+    const handleTitleChange = (newTitle: string) => {
+        setTitle(newTitle)
+        if (items.length === 1) {
+            setItems(prev => prev.map((it, i) => i === 0 ? { ...it, name: newTitle } : it))
+        }
+    }
+
+    const handleItemNameChange = (index: number, newName: string) => {
+        if (items.length === 1) {
+            setTitle(newName)
+        }
+        updateItem(index, { name: newName })
+    }
 
     const addItem = () => {
         const newIdx = items.length
@@ -143,7 +163,20 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
     }
 
     const removeItem = (index: number) => {
-        setItems(prev => prev.filter((_, i) => i !== index))
+        if (items.length <= 1) {
+            showToast('账单至少保留一个商品，若不需要整笔账单请直接删除')
+            setError('账单至少保留一个商品')
+            return
+        }
+        setItems(prev => {
+            const next = prev.filter((_, i) => i !== index)
+            const first = next[0]
+            // 如果删除后只剩 1 个商品，且该商品未命名，自动与账单名称一致
+            if (next.length === 1 && first && !first.name.trim() && title.trim()) {
+                first.name = title.trim()
+            }
+            return next
+        })
         setExpandedIdx(null)
     }
 
@@ -252,32 +285,85 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
     }
 
     const handleSave = async () => {
-        if (!title.trim()) { setError('请填写账单名称'); return }
-        if (items.length === 0) { setError('至少需要一个商品'); return }
-        for (const it of items) {
-            if (!it.name.trim()) { setError('商品名不能为空'); return }
-            if (isNaN(parseFloat(it.price)) || parseFloat(it.price) === 0) { setError('商品价格不能为0'); return }
-            if (it.memberIds.length === 0) { setError('每个商品至少分给一人'); return }
+        let finalTitle = title.trim()
+        const currentItems = items.map(it => ({ ...it }))
+
+        if (currentItems.length === 0) {
+            showToast('至少需要保留一个商品')
+            setError('至少需要保留一个商品')
+            return
         }
-        const spreadItems = applyDiscountSpread(items)
+
+        // 单品类商品名称与账单名称自动一致
+        if (currentItems.length === 1 && currentItems[0]) {
+            const single = currentItems[0]
+            const unifiedName = finalTitle || single.name.trim()
+            if (!unifiedName) {
+                showToast('请填写账单或商品名称')
+                setError('请填写账单或商品名称')
+                return
+            }
+            finalTitle = unifiedName
+            single.name = unifiedName
+        } else {
+            // 多品类时，账单名称与各商品名称独立校验
+            if (!finalTitle) {
+                showToast('请填写账单总名称')
+                setError('请填写账单总名称')
+                return
+            }
+            for (let i = 0; i < currentItems.length; i++) {
+                const it = currentItems[i]
+                if (it && !it.name.trim()) {
+                    showToast(`第 ${i + 1} 个商品名不能为空`)
+                    setError(`第 ${i + 1} 个商品名不能为空`)
+                    return
+                }
+            }
+        }
+
+        // 检查价格与参与人
+        for (let i = 0; i < currentItems.length; i++) {
+            const it = currentItems[i]
+            if (!it) continue
+            const p = parseFloat(it.price)
+            if (isNaN(p) || p === 0) {
+                const displayName = it.name || `第 ${i + 1} 个商品`
+                showToast(`商品「${displayName}」单价不能为0`)
+                setError(`商品「${displayName}」单价不能为0`)
+                return
+            }
+            if (!it.memberIds || it.memberIds.length === 0) {
+                const displayName = it.name || `第 ${i + 1} 个商品`
+                showToast(`请为「${displayName}」分配至少一名分摊成员`)
+                setError(`请为「${displayName}」分配至少一名分摊成员`)
+                return
+            }
+        }
+
+        const spreadItems = applyDiscountSpread(currentItems)
         const itemsPayload = spreadItems.map(it => ({
             name: it.name.trim(),
             price: parseFloat(it.price),
             qty: parseFloat(it.qty) || 1,
-            member_ids: it.memberIds,
+            member_ids: it.memberIds.filter(Boolean),
         }))
+
         setSaving(true)
         setError('')
         try {
             if (isCreate) {
-                await createBill({ icon, title: title.trim(), description: description.trim() || undefined, items: itemsPayload } as CreateBillData)
+                await createBill({ icon, title: finalTitle, description: description.trim() || undefined, items: itemsPayload } as CreateBillData)
             } else {
-                await updateBill(bill.id, { icon, title: title.trim(), description: description.trim() || undefined, items: itemsPayload } as UpdateBillData)
+                await updateBill(bill.id, { icon, title: finalTitle, description: description.trim() || undefined, items: itemsPayload } as UpdateBillData)
             }
+            showToast(isCreate ? '账单创建成功' : '账单已保存')
             onSaved()
             onClose()
         } catch (e) {
-            setError(e instanceof Error ? e.message : (isCreate ? '创建失败' : '保存失败'))
+            const msg = e instanceof Error ? e.message : (isCreate ? '创建失败' : '保存失败')
+            showToast(msg)
+            setError(msg)
         } finally {
             setSaving(false)
         }
@@ -290,7 +376,14 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
             maxHeight="92vh"
             className="bill-sheet"
             headerRight={
-                <button className="sheet-cancel" style={{ fontWeight: 700 }} onClick={handleSave} disabled={saving}>
+                <button
+                    className="sheet-cancel"
+                    style={{ fontWeight: 700 }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onTouchStart={e => e.stopPropagation()}
+                    onClick={handleSave}
+                    disabled={saving}
+                >
                     {saving ? '保存...' : '保存'}
                 </button>
             }
@@ -306,8 +399,13 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
                         {icon}
                     </button>
                     <div className="bs-header-inputs">
-                        <input className="bs-title-input" type="text" placeholder="账单名称"
-                            value={title} onChange={e => setTitle(e.target.value)} />
+                        <input
+                            className="bs-title-input"
+                            type="text"
+                            placeholder={items.length === 1 ? "账单/品类名称" : "账单名称"}
+                            value={title}
+                            onChange={e => handleTitleChange(e.target.value)}
+                        />
                         <input className="bs-desc-input" type="text" placeholder="备注（可选）"
                             value={description} onChange={e => setDescription(e.target.value)} />
                     </div>
@@ -425,7 +523,7 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
                             >
                                 <div className="bs-item-hdr-left">
                                     <span className="bs-item-hdr-name">
-                                        {item.name || <span className="bs-item-placeholder">未命名商品</span>}
+                                        {item.name || (items.length === 1 && title ? title : <span className="bs-item-placeholder">未命名商品</span>)}
                                     </span>
                                 </div>
                                 <div className="bs-item-hdr-right">
@@ -480,9 +578,20 @@ export default function BillSheet({ bill, friends, groups, tags, onClose, onSave
                                 <div className="bs-item-body">
                                     <div className="fg">
                                         <span className="fl">名称</span>
-                                        <input className="fi" type="text" placeholder="商品名"
-                                            value={item.name} onChange={e => updateItem(idx, { name: e.target.value })} autoFocus />
-                                        <button className="bs-remove-btn" onClick={() => removeItem(idx)}>×</button>
+                                        <input
+                                            className="fi"
+                                            type="text"
+                                            placeholder={items.length === 1 ? "品类名称（与账单名称一致）" : "商品名"}
+                                            value={items.length === 1 && !item.name && title ? title : item.name}
+                                            onChange={e => handleItemNameChange(idx, e.target.value)}
+                                            autoFocus
+                                        />
+                                        <button
+                                            className="bs-remove-btn"
+                                            onClick={() => removeItem(idx)}
+                                            title="删除商品"
+                                            type="button"
+                                        >×</button>
                                     </div>
                                     <div className="fg">
                                         <span className="fl">单价</span>

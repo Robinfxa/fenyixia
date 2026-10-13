@@ -76,10 +76,7 @@ export default function BottomSheet({
             {/* 专属拖拽手势区域：仅在此把手/标题区域向下滑动时才拖拽卡片，避免干扰卡片内列表滚动 */}
             <div
               className="sheet-drag-handle-area"
-              onPointerDown={e => dragControls.start(e)}
               style={{
-                touchAction: 'none',
-                cursor: 'grab',
                 userSelect: 'none',
                 paddingTop: 8,
                 paddingBottom: title ? 0 : 8,
@@ -88,18 +85,40 @@ export default function BottomSheet({
                 position: 'relative',
               }}
             >
-              <div className="sh" />
+              <div
+                className="sh"
+                onPointerDown={e => dragControls.start(e)}
+                style={{ touchAction: 'none', cursor: 'grab' }}
+              />
 
               {title ? (
-                <div className="sheet-titlebar" style={{ touchAction: 'none' }}>
-                  <button type="button" className="sheet-cancel" onClick={handleDismiss}>取消</button>
-                  <div className="sh-title">{title}</div>
-                  {headerRight || <div style={{ width: 44 }} />}
+                <div className="sheet-titlebar">
+                  <div
+                    onPointerDown={e => e.stopPropagation()}
+                    onTouchStart={e => e.stopPropagation()}
+                  >
+                    <button type="button" className="sheet-cancel" onClick={handleDismiss}>取消</button>
+                  </div>
+                  <div
+                    className="sh-title"
+                    onPointerDown={e => dragControls.start(e)}
+                    style={{ touchAction: 'none', cursor: 'grab' }}
+                  >
+                    {title}
+                  </div>
+                  <div
+                    onPointerDown={e => e.stopPropagation()}
+                    onTouchStart={e => e.stopPropagation()}
+                  >
+                    {headerRight || <div style={{ width: 44 }} />}
+                  </div>
                 </div>
               ) : (
                 <button
                   type="button"
                   className="sheet-close-pill"
+                  onPointerDown={e => e.stopPropagation()}
+                  onTouchStart={e => e.stopPropagation()}
                   onClick={handleDismiss}
                   aria-label="关闭"
                   style={{

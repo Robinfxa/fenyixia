@@ -414,12 +414,21 @@ billsRoute.post('/', async (c) => {
 
   const { title, icon = '🧾', description = '', date = new Date().toISOString().slice(0, 10), color, items = [] } = body;
 
-  if (!title) {
+  let effectiveTitle = (title || '').trim();
+  if (items.length === 1 && items[0]) {
+    if (!effectiveTitle && items[0].name) {
+      effectiveTitle = String(items[0].name).trim();
+    } else if (effectiveTitle && (!items[0].name || String(items[0].name).trim() === '')) {
+      items[0].name = effectiveTitle;
+    }
+  }
+
+  if (!effectiveTitle) {
     return c.json({ error: 'Title is required' }, 400);
   }
 
   const billId = crypto.randomUUID();
-  const totalAmount = items.reduce((s: number, i: any) => s + (Number(i.price) || 0) * (Number(i.qty) || 1), 0);
+  const totalAmount = roundCents(items.reduce((s: number, i: any) => s + (Number(i.price) || 0) * (Number(i.qty) || 1), 0));
 
   try {
     await db.transaction(async (tx) => {
@@ -429,7 +438,7 @@ billsRoute.post('/', async (c) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         billId,
         icon,
-        title,
+        effectiveTitle,
         description,
         totalAmount,
         date,
@@ -442,21 +451,23 @@ billsRoute.post('/', async (c) => {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const itemId = crypto.randomUUID();
-        const price = Number(item.price) || 0;
+        const price = roundCents(Number(item.price) || 0);
         const qty = Number(item.qty) || 1;
+        const itemName = item.name?.trim() || (items.length === 1 ? effectiveTitle : `Item ${i + 1}`);
 
         await tx.run(
           `INSERT INTO bill_items (id, bill_id, name, price, qty, sort_order)
            VALUES (?, ?, ?, ?, ?, ?)`,
           itemId,
           billId,
-          item.name || `Item ${i + 1}`,
+          itemName,
           price,
           qty,
           i
         );
 
-        const memberIds: string[] = item.member_ids || (item.members?.map((m: any) => m.id || m)) || [];
+        const rawMemberIds = item.member_ids || (item.members?.map((m: any) => m.id || m.user?.id || m)) || [];
+        const memberIds: string[] = rawMemberIds.filter((id: any) => typeof id === 'string' && id.trim().length > 0);
         for (const memberId of memberIds) {
           await tx.run(
             `INSERT INTO bill_item_members (item_id, user_id) VALUES (?, ?)`,
@@ -492,6 +503,16 @@ billsRoute.put('/:id', async (c) => {
   }
 
   const { title, icon, description, color, items = [] } = body;
+
+  let effectiveTitle = (title || '').trim();
+  if (items.length === 1 && items[0]) {
+    if (!effectiveTitle && items[0].name) {
+      effectiveTitle = String(items[0].name).trim();
+    } else if (effectiveTitle && (!items[0].name || String(items[0].name).trim() === '')) {
+      items[0].name = effectiveTitle;
+    }
+  }
+
   const totalAmount = roundCents(items.reduce((s: number, i: any) => s + (Number(i.price) || 0) * (Number(i.qty) || 1), 0));
 
   try {
@@ -505,7 +526,7 @@ billsRoute.put('/:id', async (c) => {
              color = COALESCE(?, color),
              total_amount = ?
          WHERE id = ?`,
-        title,
+        effectiveTitle || null,
         icon,
         description,
         color,
@@ -513,11 +534,8 @@ billsRoute.put('/:id', async (c) => {
         billId
       );
 
-      // 2. Clear old items & members
-      const oldItems = await tx.query<any>('SELECT id FROM bill_items WHERE bill_id = ?', billId);
-      for (const oldItem of oldItems) {
-        await tx.run('DELETE FROM bill_item_members WHERE item_id = ?', oldItem.id);
-      }
+      // 2. Clear old items & members safely
+      await tx.run('DELETE FROM bill_item_members WHERE item_id IN (SELECT id FROM bill_items WHERE bill_id = ?)', billId);
       await tx.run('DELETE FROM bill_items WHERE bill_id = ?', billId);
 
       // 3. Insert new items & members
@@ -526,19 +544,21 @@ billsRoute.put('/:id', async (c) => {
         const itemId = crypto.randomUUID();
         const price = roundCents(Number(item.price) || 0);
         const qty = Number(item.qty) || 1;
+        const itemName = item.name?.trim() || (items.length === 1 ? effectiveTitle : `Item ${i + 1}`);
 
         await tx.run(
           `INSERT INTO bill_items (id, bill_id, name, price, qty, sort_order)
            VALUES (?, ?, ?, ?, ?, ?)`,
           itemId,
           billId,
-          item.name || `Item ${i + 1}`,
+          itemName,
           price,
           qty,
           i
         );
 
-        const memberIds: string[] = item.member_ids || (item.members?.map((m: any) => m.id || m)) || [];
+        const rawMemberIds = item.member_ids || (item.members?.map((m: any) => m.id || m.user?.id || m)) || [];
+        const memberIds: string[] = rawMemberIds.filter((id: any) => typeof id === 'string' && id.trim().length > 0);
         for (const memberId of memberIds) {
           await tx.run(
             `INSERT INTO bill_item_members (item_id, user_id) VALUES (?, ?)`,
