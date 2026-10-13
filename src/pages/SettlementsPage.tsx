@@ -141,8 +141,21 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
   // Select a bill from archive bills list to inspect via SplitDetail
   const handleSelectArchiveBill = (archiveBill: any) => {
     const fullBill = bills.find((b) => b.id === archiveBill.id);
+    const cycleAudit = archiveData ? {
+      cycle_id: archiveData.cycle.id,
+      cycle_start: archiveData.cycle.cycle_start,
+      cycle_end: archiveData.cycle.cycle_end,
+      confirmed_at: archiveData.cycle.confirmed_at || '',
+      confirmed_by: archiveData.cycle.confirmed_by || { id: '', name: '好友', emoji: '👤' },
+      proof_image_url: archiveData.cycle.proof_image_url || undefined,
+      proof_note: archiveData.cycle.proof_note || undefined,
+    } : null;
+
     if (fullBill) {
-      setActiveBillDetail(fullBill);
+      setActiveBillDetail({
+        ...fullBill,
+        _settlement: fullBill._settlement || cycleAudit,
+      });
     } else {
       const fallback: Bill = {
         id: archiveBill.id,
@@ -161,15 +174,7 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
         items: [],
         per_amount: archiveBill.total_amount,
         my_share: archiveBill.total_amount,
-        _settlement: archiveData ? {
-          cycle_id: archiveData.cycle.id,
-          cycle_start: archiveData.cycle.cycle_start,
-          cycle_end: archiveData.cycle.cycle_end,
-          confirmed_at: archiveData.cycle.confirmed_at || '',
-          confirmed_by: archiveData.cycle.confirmed_by || { id: '', name: '好友', emoji: '👤' },
-          proof_image_url: archiveData.cycle.proof_image_url || undefined,
-          proof_note: archiveData.cycle.proof_note || undefined,
-        } : null,
+        _settlement: cycleAudit,
       };
       setActiveBillDetail(fallback);
     }

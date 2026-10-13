@@ -224,9 +224,10 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
       }
     }
 
+    const hasWeeklySettlement = settlementMap.has(billRow.id);
     let status: 'settled' | 'all_collected' | 'pending_collection' | 'paid' | 'pending_payment';
     let pendingAmount = 0;
-    if (billRow.settled) {
+    if (billRow.settled || hasWeeklySettlement) {
       status = 'settled';
       pendingAmount = 0;
     } else if (isPayer) {
@@ -256,7 +257,7 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
       total_amount: roundCents(Number(billRow.total_amount)),
       date: billRow.date,
       payer_id: billRow.payer_id,
-      settled: Boolean(billRow.settled),
+      settled: Boolean(billRow.settled || hasWeeklySettlement),
       color: billRow.color || '#4F46E5',
       payer: payer ? { id: payer.id, name: payer.name, emoji: payer.emoji, email: payer.email } : null,
       items,

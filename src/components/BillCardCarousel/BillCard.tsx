@@ -27,7 +27,12 @@ export default function BillCard({ bill, currentUserId, style, onClick }: BillCa
 
   const hasDispute = !!bill._dispute
 
-  if (bill.settled) {
+  if (bill._settlement) {
+    roleTagClass = 'settled'
+    roleTagText = '🗓️ 周结算'
+    heroLabel = isPayer ? '已周结清' : '已周支付'
+    heroAmount = isPayer ? collectTotal : myShare
+  } else if (bill.settled) {
     roleTagClass = 'settled'
     roleTagText = '\u2713 已结清'
     heroLabel = isPayer ? '已收回' : '已支付'
@@ -96,8 +101,8 @@ export default function BillCard({ bill, currentUserId, style, onClick }: BillCa
               </div>
             ))}
           </div>
-          <div className={`card-pill ${bill.settled ? 'ok' : 'ng'}`}>
-            {bill.settled ? '\u2713 已结清' : '待结算'}
+          <div className={`card-pill ${bill._settlement || bill.settled ? 'ok' : 'ng'}`}>
+            {bill._settlement ? '🗓️ 周结算' : bill.settled ? '\u2713 已结清' : '待结算'}
           </div>
         </div>
       </div>
