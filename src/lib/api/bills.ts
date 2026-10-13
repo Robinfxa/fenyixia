@@ -77,6 +77,8 @@ function normalizeBill(raw: RawBill, currentUserId: string): Bill {
     _proofUserIds: new Set((raw as any)._proofUserIds || []),
     _manualPaidUserIds: new Set((raw as any)._manualPaidUserIds || []),
     _dispute: (raw as any)._dispute || null,
+    _settlement: (raw as any)._settlement || null,
+    _memberSettlements: (raw as any)._memberSettlements || {},
   };
 }
 
