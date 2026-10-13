@@ -173,6 +173,11 @@ export async function initDb(dbFilePath?: string): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       getConn().run(stmt, (err) => {
         if (err) {
+          // If index fails because column does not yet exist on existing db, defer to migration
+          if (stmt.toUpperCase().startsWith('CREATE INDEX')) {
+            console.warn(`Index creation deferred: ${stmt}`);
+            return resolve();
+          }
           console.error(`Error executing DDL: ${stmt}\n`, err);
           return reject(err);
         }
@@ -246,6 +251,11 @@ export async function initDb(dbFilePath?: string): Promise<void> {
         }
       } catch {}
     }
+
+    // Ensure index exists after migration
+    try {
+      await run('CREATE INDEX IF NOT EXISTS idx_bills_settlement_cycle ON bills(settlement_cycle_id)');
+    } catch {}
   } catch (err) {
     console.warn('bills settlement_cycle_id migration/backfill skipped:', err);
   }
