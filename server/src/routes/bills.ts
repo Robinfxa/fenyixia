@@ -143,14 +143,15 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
     });
   }
 
-  // 6. Fetch confirmed settlement cycles to attach audit traceability
+  // 6. Fetch confirmed settlement cycles that involve current user to attach audit traceability
   const confirmedCycles = await db.query<any>(
     `SELECT sc.id as cycle_id, sc.cycle_start, sc.cycle_end, sc.confirmed_at, sc.confirmed_by,
             sc.proof_image_url, sc.proof_note, sc.settled_bill_ids,
             u.name as confirmed_by_name, u.emoji as confirmed_by_emoji
      FROM settlement_cycles sc
      LEFT JOIN users u ON u.id = sc.confirmed_by
-     WHERE sc.status = 'confirmed'`
+     WHERE sc.status = 'confirmed' AND (sc.user_id = ? OR sc.friend_id = ?)`,
+    currentUserId, currentUserId
   );
 
   const settlementMap = new Map<string, any>();
@@ -224,10 +225,9 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
       }
     }
 
-    const hasWeeklySettlement = settlementMap.has(billRow.id);
     let status: 'settled' | 'all_collected' | 'pending_collection' | 'paid' | 'pending_payment';
     let pendingAmount = 0;
-    if (billRow.settled || hasWeeklySettlement) {
+    if (billRow.settled) {
       status = 'settled';
       pendingAmount = 0;
     } else if (isPayer) {
@@ -257,7 +257,7 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
       total_amount: roundCents(Number(billRow.total_amount)),
       date: billRow.date,
       payer_id: billRow.payer_id,
-      settled: Boolean(billRow.settled || hasWeeklySettlement),
+      settled: Boolean(billRow.settled),
       color: billRow.color || '#4F46E5',
       payer: payer ? { id: payer.id, name: payer.name, emoji: payer.emoji, email: payer.email } : null,
       items,

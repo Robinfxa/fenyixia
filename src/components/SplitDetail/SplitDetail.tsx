@@ -252,13 +252,9 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
     .filter(([id]) => id !== bill.payer_id && !proofUserIds.has(id) && !manualPaid.has(id))
     .reduce((s, [, v]) => s + v, 0)
 
-  if (bill._settlement) {
+  if (bill.settled) {
     bannerClass = 'paid'
-    bannerText = '✓ 本次结算已涵盖到周结算总账单'
-    bannerAmount = isPayer ? collectTotal : (memberShares[currentUserId] || 0)
-  } else if (bill.settled) {
-    bannerClass = 'paid'
-    bannerText = '✓ 已结清'
+    bannerText = bill._settlement ? '✓ 已通过每周清账结清' : '✓ 已结清'
     bannerAmount = isPayer ? collectTotal : (memberShares[currentUserId] || 0)
   } else if (dispute) {
     bannerClass = 'dispute'
