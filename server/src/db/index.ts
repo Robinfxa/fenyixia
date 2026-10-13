@@ -223,6 +223,9 @@ export async function initDb(dbFilePath?: string): Promise<void> {
       if (!scCols.some((c) => c.name === 'confirmed_by')) {
         await run('ALTER TABLE settlement_cycles ADD COLUMN confirmed_by VARCHAR');
       }
+      if (!scCols.some((c) => c.name === 'snapshot_data')) {
+        await run('ALTER TABLE settlement_cycles ADD COLUMN snapshot_data VARCHAR');
+      }
       await run('CHECKPOINT;');
     }
   } catch (err) {

@@ -176,6 +176,206 @@ export async function computePairwiseDebt(userAId: string, userBId: string) {
   };
 }
 
+export interface SettlementSlice {
+  user_a: { id: string; name: string; emoji: string };
+  user_b: { id: string; name: string; emoji: string };
+  user_a_paid_for_b: number; // A 垫付给 B 的总额 (B 应付 A)
+  user_b_paid_for_a: number; // B 垫付给 A 的总额 (A 应付 B)
+  net_amount: number; // 抵消后的最终绝对值
+  debtor_id: string | null; // 最终实际付款人 ID
+  creditor_id: string | null; // 最终实际收款人 ID
+  debtor_name: string;
+  creditor_name: string;
+  action_summary: string;
+  bill_slices: {
+    bill_id: string;
+    title: string;
+    icon: string;
+    total_amount: number;
+    date: string;
+    payer_id: string;
+    payer_name: string;
+    payer_emoji: string;
+    user_a_share: number;
+    user_b_share: number;
+    advance_payer_id: string | null;
+    advance_amount: number;
+  }[];
+}
+
+export async function computeSettlementSlice(
+  billIds: string[],
+  userAId: string,
+  userBId: string
+): Promise<SettlementSlice> {
+  const userA = await db.queryOne<any>('SELECT id, name, emoji FROM users WHERE id = ?', userAId);
+  const userB = await db.queryOne<any>('SELECT id, name, emoji FROM users WHERE id = ?', userBId);
+
+  const uA = {
+    id: userAId,
+    name: userA?.name || '用户',
+    emoji: userA?.emoji || '👤',
+  };
+  const uB = {
+    id: userBId,
+    name: userB?.name || '好友',
+    emoji: userB?.emoji || '👤',
+  };
+
+  if (!billIds || billIds.length === 0) {
+    return {
+      user_a: uA,
+      user_b: uB,
+      user_a_paid_for_b: 0,
+      user_b_paid_for_a: 0,
+      net_amount: 0,
+      debtor_id: null,
+      creditor_id: null,
+      debtor_name: '',
+      creditor_name: '',
+      action_summary: '无关联账单，结清金额为 ¥ 0.00',
+      bill_slices: [],
+    };
+  }
+
+  const placeholders = billIds.map(() => '?').join(',');
+  const bills = await db.query<any>(
+    `SELECT b.id, b.title, b.icon, b.total_amount, b.date, b.payer_id,
+            u.name as payer_name, u.emoji as payer_emoji
+     FROM bills b
+     JOIN users u ON u.id = b.payer_id
+     WHERE b.id IN (${placeholders})
+     ORDER BY b.date DESC, b.created_at DESC`,
+    ...billIds
+  );
+
+  let userAPaidForB = 0;
+  let userBPaidForA = 0;
+  const billSlices: any[] = [];
+
+  for (const bill of bills) {
+    const items = await db.query<any>(
+      `SELECT id, price, qty FROM bill_items WHERE bill_id = ? ORDER BY sort_order ASC`,
+      bill.id
+    );
+
+    const itemMembers = await db.query<any>(
+      `SELECT bim.item_id, bim.user_id
+       FROM bill_item_members bim
+       WHERE bim.item_id IN (SELECT id FROM bill_items WHERE bill_id = ?)`,
+      bill.id
+    );
+
+    const itemMemberMap = new Map<string, string[]>();
+    for (const im of itemMembers) {
+      if (!itemMemberMap.has(im.item_id)) {
+        itemMemberMap.set(im.item_id, []);
+      }
+      itemMemberMap.get(im.item_id)!.push(im.user_id);
+    }
+
+    let aShare = 0;
+    let bShare = 0;
+
+    for (const item of items) {
+      const memberIds = itemMemberMap.get(item.id) || [];
+      const count = memberIds.length;
+      if (count === 0) continue;
+
+      const itemCost = Number(item.price) * (Number(item.qty) || 1);
+      const perPerson = itemCost / count;
+
+      if (memberIds.includes(userAId)) aShare += perPerson;
+      if (memberIds.includes(userBId)) bShare += perPerson;
+    }
+
+    if (items.length === 0) {
+      const distinctMembers = await db.query<any>(
+        `SELECT DISTINCT user_id FROM bill_item_members WHERE item_id IN (SELECT id FROM bill_items WHERE bill_id = ?)`,
+        bill.id
+      );
+      const totalMembers = distinctMembers.length || 1;
+      const avgShare = Number(bill.total_amount) / totalMembers;
+      if (distinctMembers.some((m) => m.user_id === userAId)) aShare = avgShare;
+      if (distinctMembers.some((m) => m.user_id === userBId)) bShare = avgShare;
+    }
+
+    aShare = Math.round(aShare * 100) / 100;
+    bShare = Math.round(bShare * 100) / 100;
+
+    let advancePayerId: string | null = null;
+    let advanceAmount = 0;
+
+    if (bill.payer_id === userAId && bShare > 0) {
+      userAPaidForB += bShare;
+      advancePayerId = userAId;
+      advanceAmount = bShare;
+    } else if (bill.payer_id === userBId && aShare > 0) {
+      userBPaidForA += aShare;
+      advancePayerId = userBId;
+      advanceAmount = aShare;
+    }
+
+    billSlices.push({
+      bill_id: bill.id,
+      title: bill.title,
+      icon: bill.icon || '🧾',
+      total_amount: Number(bill.total_amount),
+      date: bill.date,
+      payer_id: bill.payer_id,
+      payer_name: bill.payer_name,
+      payer_emoji: bill.payer_emoji,
+      user_a_share: aShare,
+      user_b_share: bShare,
+      advance_payer_id: advancePayerId,
+      advance_amount: Math.round(advanceAmount * 100) / 100,
+    });
+  }
+
+  userAPaidForB = Math.round(userAPaidForB * 100) / 100;
+  userBPaidForA = Math.round(userBPaidForA * 100) / 100;
+
+  let netAmount = 0;
+  let debtorId: string | null = null;
+  let creditorId: string | null = null;
+  let debtorName = '';
+  let creditorName = '';
+  let actionSummary = '';
+
+  if (userAPaidForB > userBPaidForA) {
+    netAmount = Math.round((userAPaidForB - userBPaidForA) * 100) / 100;
+    debtorId = uB.id;
+    creditorId = uA.id;
+    debtorName = uB.name;
+    creditorName = uA.name;
+    actionSummary = `${debtorName} 向 ${creditorName} 支付了 ¥ ${netAmount.toFixed(2)}`;
+  } else if (userBPaidForA > userAPaidForB) {
+    netAmount = Math.round((userBPaidForA - userAPaidForB) * 100) / 100;
+    debtorId = uA.id;
+    creditorId = uB.id;
+    debtorName = uA.name;
+    creditorName = uB.name;
+    actionSummary = `${debtorName} 向 ${creditorName} 支付了 ¥ ${netAmount.toFixed(2)}`;
+  } else {
+    netAmount = 0;
+    actionSummary = '双方代付金额刚好相互抵消，实际转账 ¥ 0.00';
+  }
+
+  return {
+    user_a: uA,
+    user_b: uB,
+    user_a_paid_for_b: userAPaidForB,
+    user_b_paid_for_a: userBPaidForA,
+    net_amount: netAmount,
+    debtor_id: debtorId,
+    creditor_id: creditorId,
+    debtor_name: debtorName,
+    creditor_name: creditorName,
+    action_summary: actionSummary,
+    bill_slices: billSlices,
+  };
+}
+
 // GET /api/settlements - List weekly settlement cycles for current user
 settlementsRoute.get('/', async (c) => {
   const user = c.get('user');
@@ -451,6 +651,13 @@ settlementsRoute.post('/:id/confirm', async (c) => {
       }
     }
 
+    const slice = await computeSettlementSlice(
+      billsToClear.map((b) => b.id),
+      user.id,
+      otherUserId
+    );
+    const snapshotJson = JSON.stringify(slice);
+
     // Mark cycle as confirmed with proof and confirmed_by
     await tx.run(
       `UPDATE settlement_cycles
@@ -460,13 +667,15 @@ settlementsRoute.post('/:id/confirm', async (c) => {
            proof_image_url = ?,
            proof_note = ?,
            net_amount = ?,
-           settled_bill_ids = ?
+           settled_bill_ids = ?,
+           snapshot_data = ?
        WHERE id = ?`,
       user.id,
       proofImageUrl.trim(),
       proofNote.trim(),
       cycle.user_id === user.id ? latestDebt.netAmount : -latestDebt.netAmount,
       JSON.stringify(billsToClear.map((b) => b.id)),
+      snapshotJson,
       cycleId
     );
   });
@@ -499,6 +708,8 @@ settlementsRoute.get('/:id/bills', async (c) => {
     return c.json({ error: '结算单不存在' }, 404);
   }
 
+  const otherUserId = cycle.user_id === user.id ? cycle.friend_id : cycle.user_id;
+
   let billIds: string[] = [];
   try {
     billIds = JSON.parse(cycle.settled_bill_ids || '[]');
@@ -508,6 +719,43 @@ settlementsRoute.get('/:id/bills', async (c) => {
   if (!Array.isArray(billIds) || billIds.length === 0) {
     const bRows = await db.query<{ id: string }>('SELECT id FROM bills WHERE settlement_cycle_id = ?', cycleId);
     billIds = bRows.map(r => r.id);
+  }
+
+  let snapshot: SettlementSlice | null = null;
+  if (cycle.snapshot_data) {
+    try {
+      const parsed = JSON.parse(cycle.snapshot_data);
+      if (parsed && parsed.user_a && parsed.user_b) {
+        if (parsed.user_a.id === user.id) {
+          snapshot = parsed;
+        } else {
+          // Align perspective to current user (user_a is current user)
+          snapshot = {
+            user_a: parsed.user_b,
+            user_b: parsed.user_a,
+            user_a_paid_for_b: parsed.user_b_paid_for_a,
+            user_b_paid_for_a: parsed.user_a_paid_for_b,
+            net_amount: parsed.net_amount,
+            debtor_id: parsed.debtor_id,
+            creditor_id: parsed.creditor_id,
+            debtor_name: parsed.debtor_name,
+            creditor_name: parsed.creditor_name,
+            action_summary: parsed.action_summary,
+            bill_slices: (parsed.bill_slices || []).map((bs: any) => ({
+              ...bs,
+              user_a_share: bs.user_b_share,
+              user_b_share: bs.user_a_share,
+            })),
+          };
+        }
+      }
+    } catch {}
+  }
+
+  // If no snapshot exists yet (for older confirmed cycles), compute now and backfill asynchronously
+  if (!snapshot && billIds.length > 0) {
+    snapshot = await computeSettlementSlice(billIds, user.id, otherUserId);
+    db.run('UPDATE settlement_cycles SET snapshot_data = ? WHERE id = ?', JSON.stringify(snapshot), cycleId).catch(() => {});
   }
 
   if (billIds.length === 0) {
@@ -527,12 +775,13 @@ settlementsRoute.get('/:id/bills', async (c) => {
           emoji: cycle.confirmed_by_emoji || '👤',
         },
         other_user: {
-          id: cycle.user_id === user.id ? cycle.friend_id : cycle.user_id,
+          id: otherUserId,
           name: cycle.other_name,
           emoji: cycle.other_emoji,
           color: cycle.other_color,
         },
       },
+      snapshot,
       bills: [],
     });
   }
@@ -564,25 +813,33 @@ settlementsRoute.get('/:id/bills', async (c) => {
         emoji: cycle.confirmed_by_emoji || '👤',
       },
       other_user: {
-        id: cycle.user_id === user.id ? cycle.friend_id : cycle.user_id,
+        id: otherUserId,
         name: cycle.other_name,
         emoji: cycle.other_emoji,
         color: cycle.other_color,
       },
     },
-    bills: billRows.map((b) => ({
-      id: b.id,
-      title: b.title,
-      icon: b.icon || '🧾',
-      color: b.color || '#4F46E5',
-      description: b.description || '',
-      total_amount: Number(b.total_amount),
-      date: b.date,
-      payer_id: b.payer_id,
-      payer_name: b.payer_name,
-      payer_emoji: b.payer_emoji,
-      settled: Boolean(b.settled),
-    })),
+    snapshot,
+    bills: billRows.map((b) => {
+      const bSlice = snapshot?.bill_slices?.find((bs) => bs.bill_id === b.id);
+      return {
+        id: b.id,
+        title: b.title,
+        icon: b.icon || '🧾',
+        color: b.color || '#4F46E5',
+        description: b.description || '',
+        total_amount: Number(b.total_amount),
+        date: b.date,
+        payer_id: b.payer_id,
+        payer_name: b.payer_name,
+        payer_emoji: b.payer_emoji,
+        settled: Boolean(b.settled),
+        advance_payer_id: bSlice?.advance_payer_id || null,
+        advance_amount: bSlice?.advance_amount || 0,
+        my_share: bSlice ? bSlice.user_a_share : undefined,
+        their_share: bSlice ? bSlice.user_b_share : undefined,
+      };
+    }),
   });
 });
 

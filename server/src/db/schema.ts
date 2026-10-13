@@ -212,6 +212,7 @@ CREATE TABLE IF NOT EXISTS settlement_cycles (
   proof_note VARCHAR,
   confirmed_by VARCHAR,
   confirmed_at TIMESTAMP,
+  snapshot_data VARCHAR,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

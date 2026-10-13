@@ -997,18 +997,140 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
               </div>
             ) : archiveData ? (
               <>
-                {/* Audit summary card */}
+                {/* 1. Historical Settlement Snapshot Card (双方代付与抵消历史切片) */}
+                {archiveData.snapshot && (
+                  <div
+                    style={{
+                      background: 'var(--bg2)',
+                      border: '1px solid var(--sep)',
+                      borderRadius: 16,
+                      padding: '14px 16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.03)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>📊</span> 双方代付与抵消明细 (历史切片)
+                      </div>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: 'var(--blue)',
+                          background: 'rgba(10, 132, 255, 0.1)',
+                          padding: '2px 7px',
+                          borderRadius: 6,
+                          fontWeight: 700,
+                        }}
+                      >
+                        已抵消对账
+                      </span>
+                    </div>
+
+                    {/* Both sides advance breakdown */}
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: 10,
+                        background: 'var(--bg3)',
+                        padding: '12px',
+                        borderRadius: 12,
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ fontSize: 11, color: 'var(--label2)' }}>
+                          👤 我代付 (对方应付)
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--label)', fontVariantNumeric: 'tabular-nums' }}>
+                          ¥{fmtMoney(archiveData.snapshot.user_a_paid_for_b)}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ fontSize: 11, color: 'var(--label2)' }}>
+                          👤 {archiveData.snapshot.user_b.name} 代付 (我应付)
+                        </div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--label)', fontVariantNumeric: 'tabular-nums' }}>
+                          ¥{fmtMoney(archiveData.snapshot.user_b_paid_for_a)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Net result banner */}
+                    <div
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 12,
+                        background:
+                          archiveData.snapshot.net_amount === 0
+                            ? 'rgba(142, 142, 147, 0.12)'
+                            : archiveData.snapshot.debtor_id === user?.id
+                            ? 'rgba(255, 149, 0, 0.12)'
+                            : 'rgba(48, 209, 88, 0.12)',
+                        border: `1px solid ${
+                          archiveData.snapshot.net_amount === 0
+                            ? 'var(--sep)'
+                            : archiveData.snapshot.debtor_id === user?.id
+                            ? 'rgba(255, 149, 0, 0.3)'
+                            : 'rgba(48, 209, 88, 0.3)'
+                        }`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--label2)', marginBottom: 2 }}>
+                          双方互相抵消后最终应付：
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
+                          {archiveData.snapshot.net_amount === 0 ? (
+                            '⚖️ 双方代付完全抵消，互不欠款'
+                          ) : archiveData.snapshot.debtor_id === user?.id ? (
+                            <>
+                              我 向 <strong>{archiveData.snapshot.creditor_name}</strong> 支付
+                            </>
+                          ) : (
+                            <>
+                              <strong>{archiveData.snapshot.debtor_name}</strong> 向 我 支付
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 800,
+                          color:
+                            archiveData.snapshot.net_amount === 0
+                              ? 'var(--label2)'
+                              : archiveData.snapshot.debtor_id === user?.id
+                              ? 'var(--orange)'
+                              : 'var(--green)',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        ¥{fmtMoney(archiveData.snapshot.net_amount)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Audit summary & Proof card */}
                 <div
                   style={{
-                    background: 'linear-gradient(135deg, rgba(48,209,88,0.1), rgba(10,132,255,0.08))',
-                    border: '1px solid rgba(48,209,88,0.25)',
+                    background: 'linear-gradient(135deg, rgba(48,209,88,0.08), rgba(10,132,255,0.06))',
+                    border: '1px solid rgba(48,209,88,0.22)',
                     borderRadius: 14,
                     padding: '14px 16px',
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
-                      🗓️ 周期结算存证
+                      🗓️ 周期结算存证记录
                     </div>
                     <span
                       style={{
@@ -1100,15 +1222,15 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
                   )}
                 </div>
 
-                {/* Bills Header */}
+                {/* 3. Bills Header */}
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--label2)' }}>
                     包含细分账单 ({archiveData.bills.length} 笔 · 点击单笔可穿透核验详情)
                   </div>
                 </div>
 
-                {/* Archive Bills List */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '42vh', overflowY: 'auto' }}>
+                {/* 4. Archive Bills List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '38vh', overflowY: 'auto' }}>
                   {archiveData.bills.length === 0 ? (
                     <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--label3)', fontSize: 12 }}>
                       暂无关联细分账单数据
@@ -1130,32 +1252,70 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
                           transition: 'transform 0.15s ease',
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                           <div
                             style={{
-                              width: 36,
-                              height: 36,
+                              width: 38,
+                              height: 38,
                               borderRadius: 10,
                               background: b.color ? `${b.color}22` : 'var(--bg3)',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               fontSize: 20,
+                              flexShrink: 0,
                             }}
                           >
                             {b.icon || '🧾'}
                           </div>
-                          <div>
-                            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--label)' }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              style={{
+                                fontSize: 14,
+                                fontWeight: 600,
+                                color: 'var(--label)',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                            >
                               {b.title}
                             </div>
-                            <div style={{ fontSize: 11, color: 'var(--label3)', marginTop: 2 }}>
-                              {b.date} · {b.payer_emoji} {b.payer_name} 垫付
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 11, color: 'var(--label3)' }}>
+                                {b.date}
+                              </span>
+                              {b.advance_amount && b.advance_amount > 0 ? (
+                                <span
+                                  style={{
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    borderRadius: 4,
+                                    padding: '1px 6px',
+                                    background:
+                                      b.advance_payer_id === user?.id
+                                        ? 'rgba(48, 209, 88, 0.12)'
+                                        : 'rgba(255, 149, 0, 0.12)',
+                                    color:
+                                      b.advance_payer_id === user?.id
+                                        ? 'var(--green)'
+                                        : 'var(--orange)',
+                                  }}
+                                >
+                                  {b.advance_payer_id === user?.id
+                                    ? `我代付 ¥${fmtMoney(b.advance_amount)}`
+                                    : `对方代付 ¥${fmtMoney(b.advance_amount)}`}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: 11, color: 'var(--label3)' }}>
+                                  {b.payer_name} 垫付
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
 
-                        <div style={{ textAlign: 'right' }}>
+                        <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
                           <div
                             style={{
                               fontSize: 14,

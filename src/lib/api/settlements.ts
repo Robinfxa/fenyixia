@@ -92,6 +92,33 @@ export async function skipSettlement(cycleId: string): Promise<{ success: boolea
   return await api.delete(`/api/settlements/${cycleId}`);
 }
 
+export interface SettlementSnapshot {
+  user_a: { id: string; name: string; emoji: string };
+  user_b: { id: string; name: string; emoji: string };
+  user_a_paid_for_b: number; // 当前用户为对方代付
+  user_b_paid_for_a: number; // 对方为当前用户代付
+  net_amount: number; // 抵消后的最终绝对值
+  debtor_id: string | null;
+  creditor_id: string | null;
+  debtor_name: string;
+  creditor_name: string;
+  action_summary: string;
+  bill_slices?: Array<{
+    bill_id: string;
+    title: string;
+    icon: string;
+    total_amount: number;
+    date: string;
+    payer_id: string;
+    payer_name: string;
+    payer_emoji: string;
+    user_a_share: number;
+    user_b_share: number;
+    advance_payer_id: string | null;
+    advance_amount: number;
+  }>;
+}
+
 export interface SettlementCycleBillsResponse {
   cycle: {
     id: string;
@@ -114,6 +141,7 @@ export interface SettlementCycleBillsResponse {
       color?: string;
     };
   };
+  snapshot?: SettlementSnapshot | null;
   bills: Array<{
     id: string;
     title: string;
@@ -126,6 +154,10 @@ export interface SettlementCycleBillsResponse {
     payer_name: string;
     payer_emoji: string;
     settled: boolean;
+    advance_payer_id?: string | null;
+    advance_amount?: number;
+    my_share?: number;
+    their_share?: number;
   }>;
 }
 
