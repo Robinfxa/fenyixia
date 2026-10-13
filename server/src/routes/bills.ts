@@ -143,33 +143,25 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
     });
   }
 
-  // 6. Fetch confirmed settlement cycles that involve current user to attach audit traceability
+  // 6. Fetch confirmed settlement cycles to attach audit traceability per bill and per member
   const confirmedCycles = await db.query<any>(
-    `SELECT sc.id as cycle_id, sc.cycle_start, sc.cycle_end, sc.confirmed_at, sc.confirmed_by,
+    `SELECT sc.id as cycle_id, sc.user_id, sc.friend_id, sc.cycle_start, sc.cycle_end, sc.confirmed_at, sc.confirmed_by,
             sc.proof_image_url, sc.proof_note, sc.settled_bill_ids,
             u.name as confirmed_by_name, u.emoji as confirmed_by_emoji
      FROM settlement_cycles sc
      LEFT JOIN users u ON u.id = sc.confirmed_by
-     WHERE sc.status = 'confirmed' AND (sc.user_id = ? OR sc.friend_id = ?)`,
-    currentUserId, currentUserId
+     WHERE sc.status = 'confirmed'`
   );
 
-  const settlementMap = new Map<string, any>();
-  for (const sc of confirmedCycles) {
-    const auditInfo = {
-      cycle_id: sc.cycle_id,
-      cycle_start: sc.cycle_start,
-      cycle_end: sc.cycle_end,
-      confirmed_at: sc.confirmed_at,
-      confirmed_by: {
-        id: sc.confirmed_by,
-        name: sc.confirmed_by_name || '好友',
-        emoji: sc.confirmed_by_emoji || '👤',
-      },
-      proof_image_url: sc.proof_image_url || '',
-      proof_note: sc.proof_note || '',
-    };
+  const billPayerMap = new Map<string, string>();
+  for (const b of billRows) {
+    billPayerMap.set(b.id, b.payer_id);
+  }
 
+  const settlementMap = new Map<string, any>();
+  const memberSettlementMap = new Map<string, Map<string, any>>();
+
+  for (const sc of confirmedCycles) {
     let ids: string[] = [];
     try {
       ids = JSON.parse(sc.settled_bill_ids || '[]');
@@ -177,8 +169,44 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
 
     if (Array.isArray(ids)) {
       for (const bid of ids) {
-        if (!settlementMap.has(bid)) {
-          settlementMap.set(bid, auditInfo);
+        const payerId = billPayerMap.get(bid);
+        if (!payerId) continue;
+
+        // Determine which member in this bill was settled by this cycle
+        let settledMemberId: string | null = null;
+        if (payerId === sc.user_id) {
+          settledMemberId = sc.friend_id;
+        } else if (payerId === sc.friend_id) {
+          settledMemberId = sc.user_id;
+        }
+
+        const auditInfo = {
+          cycle_id: sc.cycle_id,
+          cycle_start: sc.cycle_start,
+          cycle_end: sc.cycle_end,
+          confirmed_at: sc.confirmed_at,
+          confirmed_by: {
+            id: sc.confirmed_by,
+            name: sc.confirmed_by_name || '好友',
+            emoji: sc.confirmed_by_emoji || '👤',
+          },
+          proof_image_url: sc.proof_image_url || '',
+          proof_note: sc.proof_note || '',
+          settled_member_id: settledMemberId,
+        };
+
+        if (settledMemberId) {
+          if (!memberSettlementMap.has(bid)) {
+            memberSettlementMap.set(bid, new Map());
+          }
+          memberSettlementMap.get(bid)!.set(settledMemberId, auditInfo);
+        }
+
+        // Attach to bill._settlement if current user is involved in this cycle
+        if (currentUserId === sc.user_id || currentUserId === sc.friend_id) {
+          if (!settlementMap.has(bid)) {
+            settlementMap.set(bid, auditInfo);
+          }
         }
       }
     }
@@ -216,7 +244,8 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
     const unsettledMembers: Array<{ id: string; name: string; emoji: string; share: number }> = [];
 
     for (const m of nonPayers) {
-      const isMemberPaid = proofSet.has(m.id) || manualList.includes(m.id) || billRow.settled;
+      const isMemberSettledInCycle = memberSettlementMap.get(billRow.id)?.has(m.id) || false;
+      const isMemberPaid = proofSet.has(m.id) || manualList.includes(m.id) || billRow.settled || isMemberSettledInCycle;
       const roundedShare = roundCents(m.share);
       if (isMemberPaid) {
         paidMembers.push({ id: m.id, name: m.name, emoji: m.emoji, share: roundedShare });
@@ -239,7 +268,8 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
         pendingAmount = roundCents(unsettledMembers.reduce((sum, m) => sum + m.share, 0));
       }
     } else {
-      const iPaid = proofSet.has(currentUserId) || manualList.includes(currentUserId);
+      const isMeSettledInCycle = memberSettlementMap.get(billRow.id)?.has(currentUserId) || false;
+      const iPaid = proofSet.has(currentUserId) || manualList.includes(currentUserId) || isMeSettledInCycle;
       if (iPaid) {
         status = 'paid';
         pendingAmount = 0;
@@ -271,6 +301,9 @@ async function assembleBillsBatch(billRows: any[], currentUserId: string): Promi
       _manualPaidUserIds: manualList,
       _dispute: dispute,
       _settlement: settlementMap.get(billRow.id) || null,
+      _memberSettlements: memberSettlementMap.has(billRow.id)
+        ? Object.fromEntries(memberSettlementMap.get(billRow.id)!)
+        : {},
     } as any;
   });
 }

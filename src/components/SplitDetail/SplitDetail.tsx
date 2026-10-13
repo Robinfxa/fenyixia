@@ -41,15 +41,24 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
   const [previewProofImage, setPreviewProofImage] = useState<string | null>(null)
   const [settlementCycleData, setSettlementCycleData] = useState<SettlementCycleBillsResponse | null>(null)
   const [settlementLoading, setSettlementLoading] = useState(false)
+  const [activeSettlementAudit, setActiveSettlementAudit] = useState<import('../../lib/types').BillSettlementAudit | null>(null)
   const navigate = useNavigate()
   const location = useLocation()
 
-  const handleOpenSettlementAudit = async () => {
+  const effectiveSettlement = bill._settlement ||
+    Object.values(bill._memberSettlements || {})[0] ||
+    null
+
+  const currentAudit = activeSettlementAudit || effectiveSettlement
+
+  const handleOpenSettlementForAudit = async (audit: import('../../lib/types').BillSettlementAudit | null) => {
+    if (!audit) return
+    setActiveSettlementAudit(audit)
     setShowSettlementAudit(true)
-    if (bill._settlement?.cycle_id && (!settlementCycleData || settlementCycleData.cycle.id !== bill._settlement.cycle_id)) {
+    if (audit.cycle_id && (!settlementCycleData || settlementCycleData.cycle.id !== audit.cycle_id)) {
       setSettlementLoading(true)
       try {
-        const res = await fetchSettlementCycleBills(bill._settlement.cycle_id)
+        const res = await fetchSettlementCycleBills(audit.cycle_id)
         setSettlementCycleData(res)
       } catch (err) {
         console.error('Failed to load settlement cycle bills', err)
@@ -62,10 +71,11 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
   const handleNavigateToSettlement = () => {
     setShowSettlementAudit(false)
     onClose()
+    const targetCycleId = currentAudit?.cycle_id || ''
     if (location.pathname === '/settlements') {
       showToast('已返回周结清中心')
     } else {
-      navigate(`/settlements?cycleId=${bill._settlement?.cycle_id || ''}`)
+      navigate(`/settlements?cycleId=${targetCycleId}`)
     }
   }
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -147,22 +157,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
     protestBill(bill.id)
   }
 
-  const handleTogglePaid = async (userId: string) => {
-    if (!isPayer || userId === bill.payer_id || bill.settled) return
-    try {
-      const nowPaid = await toggleManualPayment(bill.id, userId)
-      setManualPaid(prev => {
-        const next = new Set(prev)
-        if (nowPaid) next.add(userId)
-        else next.delete(userId)
-        return next
-      })
-      showToast(nowPaid ? '已标记为已付款' : '已取消付款标记')
-      onRefresh()
-    } catch (err) {
-      console.error('Toggle paid failed:', err)
-    }
-  }
+
 
   const handleDisputeSubmitted = () => {
     setShowDispute(false)
@@ -244,13 +239,18 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
 
   const proofUserIds = bill._proofUserIds || new Set<string>()
   const nonPayerMembers = bill.members.filter(m => m.id !== bill.payer_id)
-  const allCollected = nonPayerMembers.length > 0 &&
-    nonPayerMembers.every(m => proofUserIds.has(m.id) || manualPaid.has(m.id))
+  const isMemberSettledOrPaid = (id: string) =>
+    proofUserIds.has(id) || manualPaid.has(id) || Boolean(bill._memberSettlements?.[id])
 
-  // Amount still outstanding (exclude already paid members)
+  const allCollected = nonPayerMembers.length > 0 &&
+    nonPayerMembers.every(m => isMemberSettledOrPaid(m.id))
+
+  // Amount still outstanding (exclude already paid/settled members)
   const pendingTotal = Object.entries(memberShares)
-    .filter(([id]) => id !== bill.payer_id && !proofUserIds.has(id) && !manualPaid.has(id))
+    .filter(([id]) => id !== bill.payer_id && !isMemberSettledOrPaid(id))
     .reduce((s, [, v]) => s + v, 0)
+
+  const isMeSettledInCycle = Boolean(bill._memberSettlements?.[currentUserId])
 
   if (bill.settled) {
     bannerClass = 'paid'
@@ -272,9 +272,13 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
     bannerClass = allCollected ? 'paid' : 'collect'
     bannerText = allCollected ? '✅ 已收齐，可标记结清' : '💰 你是垫付人，待收款'
     bannerAmount = allCollected ? collectTotal : pendingTotal
-  } else if (bill._hasMeProof || manualPaid.has(currentUserId)) {
+  } else if (bill._hasMeProof || manualPaid.has(currentUserId) || isMeSettledInCycle) {
     bannerClass = 'paid'
-    bannerText = bill._hasMeProof ? '✓ 你已上传付款凭证' : '✓ 垫付人已标记你为已付款'
+    bannerText = isMeSettledInCycle
+      ? '✓ 你已通过每周清账结清'
+      : bill._hasMeProof
+      ? '✓ 你已上传付款凭证'
+      : '✓ 垫付人已标记你为已付款'
     bannerAmount = memberShares[currentUserId] || 0
   } else {
     bannerClass = 'pay'
@@ -310,7 +314,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               </div>
 
               {/* Weekly Settlement Audit Pill */}
-              {bill._settlement && (
+              {effectiveSettlement && (
                 <div
                   style={{
                     background: 'linear-gradient(135deg, rgba(10,132,255,0.08), rgba(99,102,241,0.08))',
@@ -323,7 +327,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                     cursor: 'pointer',
                     boxSizing: 'border-box',
                   }}
-                  onClick={handleOpenSettlementAudit}
+                  onClick={() => handleOpenSettlementForAudit(effectiveSettlement)}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 18 }}>🗓️</span>
@@ -341,7 +345,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                           textOverflow: 'ellipsis',
                         }}
                       >
-                        周期 {bill._settlement.cycle_start} ~ {bill._settlement.cycle_end} · 结清人：{bill._settlement.confirmed_by.name}
+                        周期 {effectiveSettlement.cycle_start} ~ {effectiveSettlement.cycle_end} · 结清人：{effectiveSettlement.confirmed_by.name}
                       </div>
                     </div>
                   </div>
@@ -470,25 +474,56 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                   const hasProof = proofUsers.has(m.id)
                   const isManualPaid = manualPaid.has(m.id)
                   const isMemberPayer = m.id === bill.payer_id
-                  const isPaid = hasProof || isManualPaid || bill.settled
-                  const canToggle = isPayer && !isMemberPayer && !bill.settled
+
+                  // 该成员对应的周结算审计信息
+                  const memberSettlement = bill._memberSettlements?.[m.id] ||
+                    (effectiveSettlement && (effectiveSettlement.settled_member_id === m.id || (!effectiveSettlement.settled_member_id && bill.members.length === 2 && !isMemberPayer)) ? effectiveSettlement : null)
+
+                  const isPaid = hasProof || isManualPaid || Boolean(memberSettlement) || bill.settled
+
                   return (
                     <div
                       key={m.id}
-                      className={`detail-summary-row ${isMe ? 'me' : ''} ${!isMemberPayer && isPaid ? 'paid' : ''} ${canToggle ? 'tappable' : ''}`}
-                      onClick={() => canToggle && handleTogglePaid(m.id)}
+                      className={`detail-summary-row ${isMe ? 'me' : ''} ${!isMemberPayer && isPaid ? 'paid' : ''}`}
+                      onClick={memberSettlement ? () => handleOpenSettlementForAudit(memberSettlement) : undefined}
+                      style={{ cursor: memberSettlement ? 'pointer' : 'default' }}
                     >
                       <div className="detail-summary-avatar" style={{ background: 'var(--bg4)' }}>
                         {m.emoji}
                       </div>
-                      <div className="detail-summary-name">
-                        {m.name}
+                      <div className="detail-summary-name" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                        <span>{m.name}</span>
                         {isMemberPayer && (
                           <span className="detail-summary-label"> (垫付人)</span>
                         )}
-                        {!isMemberPayer && isPaid && (
+                        {!isMemberPayer && memberSettlement ? (
+                          <span
+                            className="detail-summary-settlement-badge"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenSettlementForAudit(memberSettlement);
+                            }}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 3,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: 'var(--blue)',
+                              background: 'rgba(10, 132, 255, 0.12)',
+                              border: '1px solid rgba(10, 132, 255, 0.28)',
+                              borderRadius: 6,
+                              padding: '2px 7px',
+                              cursor: 'pointer',
+                            }}
+                            title="点击查看周结算汇总账单与凭证"
+                          >
+                            <span>✓ 🗓️ 周结算</span>
+                            <span style={{ fontSize: 11 }}>›</span>
+                          </span>
+                        ) : !isMemberPayer && isPaid ? (
                           <span className="detail-summary-paid-badge">✓ 已付</span>
-                        )}
+                        ) : null}
                       </div>
                       <div className="detail-summary-amount">
                         {isMemberPayer ? (
@@ -786,7 +821,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
         </BottomSheet>
       )}
 
-      {showSettlementAudit && bill._settlement && (
+      {showSettlementAudit && currentAudit && (
         <BottomSheet onClose={() => setShowSettlementAudit(false)} title="周结算汇总账单明细">
           <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Status Card */}
@@ -946,7 +981,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               >
                 <span style={{ color: 'var(--label2)' }}>结清周期</span>
                 <span style={{ fontWeight: 600, color: 'var(--label)' }}>
-                  {bill._settlement.cycle_start} ~ {bill._settlement.cycle_end}
+                  {currentAudit.cycle_start} ~ {currentAudit.cycle_end}
                 </span>
               </div>
               <div
@@ -960,7 +995,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               >
                 <span style={{ color: 'var(--label2)' }}>结清生效时间</span>
                 <span style={{ fontWeight: 600, color: 'var(--label)' }}>
-                  {new Date(bill._settlement.confirmed_at).toLocaleString('zh-CN')}
+                  {new Date(currentAudit.confirmed_at).toLocaleString('zh-CN')}
                 </span>
               </div>
               <div
@@ -968,16 +1003,16 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                   display: 'flex',
                   justifyContent: 'space-between',
                   padding: '11px 13px',
-                  borderBottom: bill._settlement.proof_note ? '1px solid var(--sep)' : 'none',
+                  borderBottom: currentAudit.proof_note ? '1px solid var(--sep)' : 'none',
                   fontSize: 13,
                 }}
               >
                 <span style={{ color: 'var(--label2)' }}>确认人</span>
                 <span style={{ fontWeight: 600, color: 'var(--label)' }}>
-                  {bill._settlement.confirmed_by.emoji} {bill._settlement.confirmed_by.name}
+                  {currentAudit.confirmed_by.emoji} {currentAudit.confirmed_by.name}
                 </span>
               </div>
-              {bill._settlement.proof_note && (
+              {currentAudit.proof_note && (
                 <div
                   style={{
                     display: 'flex',
@@ -988,20 +1023,20 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                 >
                   <span style={{ color: 'var(--label2)' }}>转账备注</span>
                   <span style={{ fontWeight: 600, color: 'var(--label)' }}>
-                    {bill._settlement.proof_note}
+                    {currentAudit.proof_note}
                   </span>
                 </div>
               )}
             </div>
 
             {/* 3. Proof Image (周结算总账单凭证) */}
-            {bill._settlement.proof_image_url ? (
+            {currentAudit.proof_image_url ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--label2)' }}>
                   周结算付款凭证（总账单）
                 </div>
                 <div
-                  onClick={() => setPreviewProofImage(bill._settlement!.proof_image_url!)}
+                  onClick={() => setPreviewProofImage(currentAudit.proof_image_url!)}
                   style={{
                     borderRadius: 14,
                     overflow: 'hidden',
@@ -1012,7 +1047,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                   }}
                 >
                   <img
-                    src={bill._settlement.proof_image_url}
+                    src={currentAudit.proof_image_url}
                     alt="周清账付款凭证"
                     style={{
                       width: '100%',

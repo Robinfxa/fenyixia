@@ -48,8 +48,8 @@ export default function BillListView({ bills, showMyShare, onSelectBill }: BillL
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--label3)', marginTop: 3 }}>
                             {showMyShare
-                                ? `付给 ${bill.payer_emoji} ${bill.payer_name} · ${new Date(bill.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}日${bill.settled ? (bill._settlement ? ' · 🗓️ 周结清' : ' · ✅ 已结清') : ''}`
-                                : `${new Date(bill.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}日${bill.settled ? (bill._settlement ? ' · 🗓️ 周结清' : ' · ✅ 已结清') : ''}`
+                                ? `付给 ${bill.payer_emoji} ${bill.payer_name} · ${new Date(bill.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}日${bill.settled ? (bill._settlement ? ' · 🗓️ 周结清' : ' · ✅ 已结清') : (bill._memberSettlements && Object.keys(bill._memberSettlements).length > 0 ? ' · 🗓️ 部分周结' : '')}`
+                                : `${new Date(bill.date).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}日${bill.settled ? (bill._settlement ? ' · 🗓️ 周结清' : ' · ✅ 已结清') : (bill._memberSettlements && Object.keys(bill._memberSettlements).length > 0 ? ' · 🗓️ 部分周结' : '')}`
                             }
                         </div>
                     </div>

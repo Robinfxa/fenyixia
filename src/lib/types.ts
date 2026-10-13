@@ -25,6 +25,7 @@ export interface BillSettlementAudit {
   }
   proof_image_url?: string
   proof_note?: string
+  settled_member_id?: string | null
 }
 
 export interface Bill {
@@ -54,6 +55,8 @@ export interface Bill {
   _dispute?: BillDispute | null
   /** Settlement cycle audit information if settled via weekly settlement */
   _settlement?: BillSettlementAudit | null
+  /** Map of memberId -> BillSettlementAudit for members settled via weekly cycle */
+  _memberSettlements?: Record<string, BillSettlementAudit>
 }
 
 export interface PaymentProof {
