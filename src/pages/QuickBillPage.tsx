@@ -124,7 +124,7 @@ export default function QuickBillPage() {
   return (
     <div className="scanner-page">
       <div className="scanner-header">
-        <button className="scanner-back" onClick={() => navigate(-1)}>← 返回</button>
+        <button type="button" className="nav-back-btn" onClick={() => navigate(-1)}>‹ 返回</button>
         <span className="scanner-title">一句话生成账单</span>
       </div>
 

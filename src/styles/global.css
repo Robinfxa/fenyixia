@@ -513,7 +513,9 @@ body {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   display: flex;
   align-items: flex-end;
 }
@@ -523,8 +525,10 @@ body {
   max-width: 430px;
   margin: 0 auto;
   background: var(--bg2);
-  border-radius: 13px 13px 0 0;
-  padding: 10px 0 0;
+  border-radius: 20px 20px 0 0;
+  border-top: 0.5px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
+  padding: 8px 0 0;
   overflow: hidden;
 }
 
@@ -538,11 +542,11 @@ body {
 }
 
 .sh {
-  width: 38px;
-  height: 5px;
+  width: 36px;
+  height: 4.5px;
   background: var(--fill);
-  border-radius: 3px;
-  margin: 0 auto 4px;
+  border-radius: 2.5px;
+  margin: 0 auto 6px;
   transition: opacity 0.15s, transform 0.15s, background-color 0.15s;
 }
 
@@ -555,24 +559,92 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px 14px;
+  padding: 8px 16px 12px;
   border-bottom: 0.5px solid var(--sep);
+  min-height: 44px;
 }
 
 .sheet-cancel {
-  font-size: 17px;
+  font-size: 16px;
+  font-weight: 400;
   color: var(--blue);
   background: none;
   border: none;
   cursor: pointer;
   font-family: inherit;
-  padding: 0;
+  padding: 4px 0;
+  transition: opacity 0.15s;
+}
+
+.sheet-cancel:active {
+  opacity: 0.5;
 }
 
 .sh-title {
   font-size: 17px;
   font-weight: 600;
   letter-spacing: -0.4px;
+  color: var(--label);
+}
+
+.sheet-close-pill {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg3);
+  border: none;
+  color: var(--label2);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s, background-color 0.15s;
+}
+
+.sheet-close-pill:active {
+  opacity: 0.6;
+  transform: scale(0.92);
+  background: var(--bg4);
+}
+
+.nav-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 16px;
+  font-weight: 400;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 4px 0;
+  line-height: 1;
+  transition: opacity 0.15s ease;
+}
+
+.nav-back-btn:active {
+  opacity: 0.5;
+}
+
+/* ══════════════════════════════════════════
+   Standard Design System Cards
+══════════════════════════════════════════ */
+.ui-card {
+  background: var(--bg2);
+  border-radius: 16px;
+  border: 1px solid var(--sep);
+  padding: 14px 16px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.ui-card-secondary {
+  background: var(--bg3);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 12px;
 }
 
 .sheet-body {
@@ -4028,7 +4100,9 @@ body {
 .mp-dialog-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   z-index: 2000;
   display: flex;
   align-items: center;
@@ -4037,14 +4111,16 @@ body {
 
 .mp-dialog {
   background: var(--bg2);
-  border-radius: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--sep);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   padding: 20px;
-  width: 300px;
+  width: 310px;
   max-width: 90vw;
 }
 
 .mp-dialog-title {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--label1);
   text-align: center;
@@ -4066,9 +4142,9 @@ body {
 
 .mp-dialog-input {
   flex: 1;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1.5px solid var(--sep);
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--sep);
   background: var(--bg3);
   color: var(--label1);
   font-size: 14px;
@@ -4081,25 +4157,31 @@ body {
 }
 
 .mp-dialog-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
-  justify-content: flex-end;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .mp-dialog-cancel {
-  padding: 8px 16px;
+  padding: 9px 16px;
   border-radius: 10px;
   border: none;
   background: var(--bg3);
   color: var(--label2);
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   font-family: inherit;
+  transition: opacity 0.15s;
+}
+
+.mp-dialog-cancel:active {
+  opacity: 0.6;
 }
 
 .mp-dialog-confirm {
-  padding: 8px 16px;
+  padding: 9px 16px;
   border-radius: 10px;
   border: none;
   background: var(--blue);
@@ -4108,6 +4190,11 @@ body {
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
+  transition: opacity 0.15s;
+}
+
+.mp-dialog-confirm:active {
+  opacity: 0.8;
 }
 
 .mp-dialog-confirm:disabled {

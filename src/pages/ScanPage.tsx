@@ -213,7 +213,7 @@ export default function ScanPage() {
   return (
     <div className="scanner-page">
       <div className="scanner-header">
-        <button className="scanner-back" onClick={() => navigate(-1)}>← 返回</button>
+        <button type="button" className="nav-back-btn" onClick={() => navigate(-1)}>‹ 返回</button>
         <span className="scanner-title">小票扫描</span>
       </div>
 

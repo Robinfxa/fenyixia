@@ -29,8 +29,10 @@ export default function BillListView({ bills, showMyShare, onSelectBill }: BillL
                         display: 'flex', alignItems: 'center', gap: 14,
                         padding: '14px 16px',
                         background: 'var(--bg2)',
-                        borderRadius: 14,
-                        marginBottom: 8,
+                        borderRadius: 16,
+                        border: '1px solid var(--sep)',
+                        marginBottom: 10,
+                        boxShadow: '0 1px 4px rgba(0, 0, 0, 0.08)',
                         cursor: 'pointer',
                     }}
                 >

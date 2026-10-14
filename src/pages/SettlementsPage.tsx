@@ -275,16 +275,9 @@ export default function SettlementsPage({ onAddClick }: { onAddClick?: () => voi
       <div className="header">
         <div className="nav-row">
           <button
+            type="button"
+            className="nav-back-btn"
             onClick={() => navigate('/')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--blue)',
-              fontSize: 15,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              padding: '4px 0',
-            }}
           >
             ‹ 我的账单
           </button>

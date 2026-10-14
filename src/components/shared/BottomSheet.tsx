@@ -96,21 +96,36 @@ export default function BottomSheet({
                   <div
                     onPointerDown={e => e.stopPropagation()}
                     onTouchStart={e => e.stopPropagation()}
+                    style={{ minWidth: 44, display: 'flex', alignItems: 'center' }}
                   >
-                    <button type="button" className="sheet-cancel" onClick={handleDismiss}>取消</button>
+                    {headerRight ? (
+                      <button type="button" className="sheet-cancel" onClick={handleDismiss}>取消</button>
+                    ) : null}
                   </div>
                   <div
                     className="sh-title"
                     onPointerDown={e => dragControls.start(e)}
-                    style={{ touchAction: 'none', cursor: 'grab' }}
+                    style={{ touchAction: 'none', cursor: 'grab', textAlign: 'center', flex: 1 }}
                   >
                     {title}
                   </div>
                   <div
                     onPointerDown={e => e.stopPropagation()}
                     onTouchStart={e => e.stopPropagation()}
+                    style={{ minWidth: 44, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}
                   >
-                    {headerRight || <div style={{ width: 44 }} />}
+                    {headerRight ? (
+                      headerRight
+                    ) : (
+                      <button
+                        type="button"
+                        className="sheet-close-pill"
+                        onClick={handleDismiss}
+                        aria-label="关闭"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -125,18 +140,6 @@ export default function BottomSheet({
                     position: 'absolute',
                     right: 16,
                     top: 8,
-                    width: 28,
-                    height: 28,
-                    borderRadius: '50%',
-                    background: 'var(--bg3)',
-                    border: 'none',
-                    color: 'var(--label2)',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
                   }}
                 >
                   ✕

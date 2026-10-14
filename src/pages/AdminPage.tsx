@@ -347,7 +347,7 @@ export default function AdminPage() {
   return (
     <div className="admin-page">
       <div className="admin-header">
-        <button className="admin-back" onClick={() => navigate('/')}>← 返回</button>
+        <button type="button" className="nav-back-btn" onClick={() => navigate('/')}>‹ 返回</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <h1 className="admin-title" style={{ margin: 0 }}>
             {adminRoleInfo?.is_super_admin ? '👑 超级管理员控制台' : '🤖 二级管理员 (AI 凭证配置)'}

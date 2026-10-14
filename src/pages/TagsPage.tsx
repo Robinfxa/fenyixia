@@ -39,11 +39,9 @@ export default function TagsPage({ onAddClick }: { onAddClick?: () => void }) {
       <div className="header">
         <div className="nav-row">
           <button
+            type="button"
+            className="nav-back-btn"
             onClick={() => navigate('/contacts')}
-            style={{
-              background: 'none', border: 'none', color: 'var(--blue)',
-              fontSize: 15, cursor: 'pointer', fontFamily: 'inherit', padding: '4px 0',
-            }}
           >
             ‹ 通讯录
           </button>
