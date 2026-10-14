@@ -42,6 +42,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
   const [settlementCycleData, setSettlementCycleData] = useState<SettlementCycleBillsResponse | null>(null)
   const [settlementLoading, setSettlementLoading] = useState(false)
   const [activeSettlementAudit, setActiveSettlementAudit] = useState<import('../../lib/types').BillSettlementAudit | null>(null)
+  const [settlementTargetMemberName, setSettlementTargetMemberName] = useState<string>('')
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -51,9 +52,10 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
 
   const currentAudit = activeSettlementAudit || effectiveSettlement
 
-  const handleOpenSettlementForAudit = async (audit: import('../../lib/types').BillSettlementAudit | null) => {
+  const handleOpenSettlementForAudit = async (audit: import('../../lib/types').BillSettlementAudit | null, memberName?: string) => {
     if (!audit) return
     setActiveSettlementAudit(audit)
+    setSettlementTargetMemberName(memberName || '')
     setShowSettlementAudit(true)
     if (audit.cycle_id && (!settlementCycleData || settlementCycleData.cycle.id !== audit.cycle_id)) {
       setSettlementLoading(true)
@@ -306,66 +308,19 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
               {/* Role banner */}
               <div
                 className={`detail-role-banner ${bannerClass}`}
-                onClick={bannerClass === 'pay' ? () => setShowPaySheet(true) : undefined}
-                style={{ cursor: bannerClass === 'pay' ? 'pointer' : 'default' }}
+                onClick={
+                  bannerClass === 'pay'
+                    ? () => setShowPaySheet(true)
+                    : isMeSettledInCycle && bill._memberSettlements?.[currentUserId]
+                    ? () => handleOpenSettlementForAudit(bill._memberSettlements![currentUserId] || null, '我')
+                    : undefined
+                }
+                style={{ cursor: (bannerClass === 'pay' || (isMeSettledInCycle && bill._memberSettlements?.[currentUserId])) ? 'pointer' : 'default' }}
+                title={isMeSettledInCycle && bill._memberSettlements?.[currentUserId] ? '点击查看我的周结算明细与凭证' : undefined}
               >
                 <span>{bannerText}</span>
                 <span className="role-amount">{fmtMoney(bannerAmount)}</span>
               </div>
-
-              {/* Weekly Settlement Audit Pill */}
-              {effectiveSettlement && (
-                <div
-                  style={{
-                    background: 'linear-gradient(135deg, rgba(10,132,255,0.08), rgba(99,102,241,0.08))',
-                    border: '1px solid rgba(10,132,255,0.22)',
-                    borderRadius: 12,
-                    padding: '10px 12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    cursor: 'pointer',
-                    boxSizing: 'border-box',
-                  }}
-                  onClick={() => handleOpenSettlementForAudit(effectiveSettlement)}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                    <span style={{ fontSize: 18 }}>🗓️</span>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--label)' }}>
-                        本次结算已涵盖到周结算总账单
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: 'var(--label2)',
-                          marginTop: 2,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        周期 {effectiveSettlement.cycle_start} ~ {effectiveSettlement.cycle_end} · 结清人：{effectiveSettlement.confirmed_by.name}
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 2,
-                      color: 'var(--blue)',
-                      fontSize: 12,
-                      fontWeight: 600,
-                      flexShrink: 0,
-                      marginLeft: 8,
-                    }}
-                  >
-                    <span>查看周汇总明细</span>
-                    <span style={{ fontSize: 14 }}>›</span>
-                  </div>
-                </div>
-              )}
 
               {/* Dispute review - visible to all members */}
               {dispute && (
@@ -485,7 +440,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                     <div
                       key={m.id}
                       className={`detail-summary-row ${isMe ? 'me' : ''} ${!isMemberPayer && isPaid ? 'paid' : ''}`}
-                      onClick={memberSettlement ? () => handleOpenSettlementForAudit(memberSettlement) : undefined}
+                      onClick={memberSettlement ? () => handleOpenSettlementForAudit(memberSettlement, m.name) : undefined}
                       style={{ cursor: memberSettlement ? 'pointer' : 'default' }}
                     >
                       <div className="detail-summary-avatar" style={{ background: 'var(--bg4)' }}>
@@ -501,7 +456,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
                             className="detail-summary-settlement-badge"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleOpenSettlementForAudit(memberSettlement);
+                              handleOpenSettlementForAudit(memberSettlement, m.name);
                             }}
                             style={{
                               display: 'inline-flex',
@@ -822,7 +777,10 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
       )}
 
       {showSettlementAudit && currentAudit && (
-        <BottomSheet onClose={() => setShowSettlementAudit(false)} title="周结算汇总账单明细">
+        <BottomSheet
+          onClose={() => setShowSettlementAudit(false)}
+          title={settlementTargetMemberName ? `周结算明细 · ${settlementTargetMemberName}` : '周结算汇总账单明细'}
+        >
           <div style={{ padding: '0 16px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Status Card */}
             <div
@@ -836,7 +794,7 @@ export default function SplitDetail({ bill, currentUserId, onClose, onRefresh }:
             >
               <div style={{ fontSize: 26, marginBottom: 4 }}>🧾 ➔ 🗓️</div>
               <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--label)' }}>
-                本次结算已涵盖到周结算总账单
+                {settlementTargetMemberName ? `${settlementTargetMemberName} 的分摊已涵盖到周结算总账单` : '本次结算已涵盖到周结算总账单'}
               </div>
               <div style={{ fontSize: 12, color: 'var(--label2)', marginTop: 4 }}>
                 结清凭证已归档存证 · 涵盖多笔细分账单抵消对账
