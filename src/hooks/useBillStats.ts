@@ -95,6 +95,8 @@ export interface BillStatsResult {
 
   // Visual Breakdowns
   categories: CategoryStat[]
+  personalCategories: CategoryStat[]
+  frontedCategories: CategoryStat[]
   participants: ParticipantStat[] // Legacy compatibility
   friends: FriendLedgerStat[]
   trend: TrendPoint[]
@@ -159,6 +161,8 @@ export function useBillStats(
       totalBillsCount: 0,
       avgBillAmount: 0,
       categories: [],
+      personalCategories: [],
+      frontedCategories: [],
       participants: [],
       friends: [],
       trend: [],
@@ -219,8 +223,16 @@ export function useBillStats(
       bills: FriendJointBill[]
     }>()
 
-    // Category Accumulator Map: categoryName -> stats
-    const categoryMap = new Map<string, {
+    // Category Accumulator Map (Personal): categoryName -> stats based on myShare
+    const personalCategoryMap = new Map<string, {
+      amount: number
+      count: number
+      icon: string
+      largestBill?: { id: string; title: string; amount: number; date: string; icon: string }
+    }>()
+
+    // Category Accumulator Map (Fronted): categoryName -> stats based on total_amount when isPayer
+    const frontedCategoryMap = new Map<string, {
       amount: number
       count: number
       icon: string
@@ -270,26 +282,49 @@ export function useBillStats(
         }
       }
 
-      // Category breakdown (attributed based on user's share if > 0, else bill total)
       const cat = getCategoryForIcon(b.icon)
-      const catSpend = myShare > 0 ? myShare : b.total_amount
-      const prevCat = categoryMap.get(cat) || {
-        amount: 0,
-        count: 0,
-        icon: b.icon || CATEGORY_DEFAULT_ICONS[cat] || '🧾',
-      }
-      prevCat.amount += catSpend
-      prevCat.count += 1
-      if (!prevCat.largestBill || b.total_amount > prevCat.largestBill.amount) {
-        prevCat.largestBill = {
-          id: b.id,
-          title: b.title,
-          amount: b.total_amount,
-          date: b.date,
-          icon: b.icon,
+
+      // 1. Personal consumption category breakdown (only when user has positive share)
+      if (myShare > 0) {
+        const prevPersonal = personalCategoryMap.get(cat) || {
+          amount: 0,
+          count: 0,
+          icon: b.icon || CATEGORY_DEFAULT_ICONS[cat] || '🧾',
         }
+        prevPersonal.amount += myShare
+        prevPersonal.count += 1
+        if (!prevPersonal.largestBill || myShare > prevPersonal.largestBill.amount) {
+          prevPersonal.largestBill = {
+            id: b.id,
+            title: b.title,
+            amount: myShare,
+            date: b.date,
+            icon: b.icon,
+          }
+        }
+        personalCategoryMap.set(cat, prevPersonal)
       }
-      categoryMap.set(cat, prevCat)
+
+      // 2. Fronted category breakdown (only when user is payer)
+      if (isPayer && b.total_amount > 0) {
+        const prevFronted = frontedCategoryMap.get(cat) || {
+          amount: 0,
+          count: 0,
+          icon: b.icon || CATEGORY_DEFAULT_ICONS[cat] || '🧾',
+        }
+        prevFronted.amount += b.total_amount
+        prevFronted.count += 1
+        if (!prevFronted.largestBill || b.total_amount > prevFronted.largestBill.amount) {
+          prevFronted.largestBill = {
+            id: b.id,
+            title: b.title,
+            amount: b.total_amount,
+            date: b.date,
+            icon: b.icon,
+          }
+        }
+        frontedCategoryMap.set(cat, prevFronted)
+      }
 
       // Social AA Ledger (Track interactions with each other member)
       const otherMembers = b.members.filter(m => m.id !== userId)
@@ -390,18 +425,24 @@ export function useBillStats(
     }
 
     // 3. Build Category Breakdown
-    const totalCatAmount = Array.from(categoryMap.values()).reduce((s, c) => s + c.amount, 0)
-    const categories: CategoryStat[] = Array.from(categoryMap.entries())
-      .map(([cat, data]) => ({
-        category: cat,
-        amount: data.amount,
-        count: data.count,
-        percentage: totalCatAmount > 0 ? (data.amount / totalCatAmount) * 100 : 0,
-        color: CATEGORY_COLORS[cat] || '#8E8E93',
-        icon: data.icon,
-        largestBill: data.largestBill,
-      }))
-      .sort((a, b) => b.amount - a.amount)
+    const buildCategoryStats = (map: typeof personalCategoryMap): CategoryStat[] => {
+      const totalAmount = Array.from(map.values()).reduce((s, c) => s + c.amount, 0)
+      return Array.from(map.entries())
+        .map(([cat, data]) => ({
+          category: cat,
+          amount: data.amount,
+          count: data.count,
+          percentage: totalAmount > 0 ? (data.amount / totalAmount) * 100 : 0,
+          color: CATEGORY_COLORS[cat] || '#8E8E93',
+          icon: data.icon,
+          largestBill: data.largestBill,
+        }))
+        .sort((a, b) => b.amount - a.amount)
+    }
+
+    const personalCategories = buildCategoryStats(personalCategoryMap)
+    const frontedCategories = buildCategoryStats(frontedCategoryMap)
+    const categories = personalCategories
 
     // 4. Build Friends Breakdown
     const friends: FriendLedgerStat[] = Array.from(friendMap.values())
@@ -593,6 +634,8 @@ export function useBillStats(
       totalBillsCount,
       avgBillAmount,
       categories,
+      personalCategories,
+      frontedCategories,
       participants,
       friends,
       trend,

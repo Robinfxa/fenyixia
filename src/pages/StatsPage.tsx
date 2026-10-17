@@ -29,12 +29,15 @@ export default function StatsPage({ onAddClick }: { onAddClick?: () => void }) {
   })
 
   const [activeTab, setActiveTab] = useState<StatsTab>('overview')
+  const [categoryMode, setCategoryMode] = useState<'personal' | 'fronted'>('personal')
   const [showRecapModal, setShowRecapModal] = useState(false)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
 
   const stats = useBillStats(bills, dateFilter, 'expense', user?.id)
 
-  const donutData: DonutSlice[] = stats.categories.map(c => ({
+  const currentCategories = categoryMode === 'personal' ? stats.personalCategories : stats.frontedCategories
+
+  const donutData: DonutSlice[] = currentCategories.map(c => ({
     label: c.category,
     value: c.amount,
     color: c.color,
@@ -104,7 +107,7 @@ export default function StatsPage({ onAddClick }: { onAddClick?: () => void }) {
               {([
                 { key: 'overview', label: '📊 走势与洞察' },
                 { key: 'social', label: `👥 社交往来 (${stats.friends.length})` },
-                { key: 'category', label: `🏷️ 品类分布 (${stats.categories.length})` },
+                { key: 'category', label: `🏷️ 品类分布 (${currentCategories.length})` },
               ] as const).map(tab => {
                 const isActive = activeTab === tab.key
                 return (
@@ -227,18 +230,60 @@ export default function StatsPage({ onAddClick }: { onAddClick?: () => void }) {
             {/* ── TAB 3: Category Breakdown ── */}
             {activeTab === 'category' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <Section title="🍩 品类支出分布">
+                {/* 视角切换：个人开销 vs 我垫付的 */}
+                <div style={{
+                  display: 'flex',
+                  background: 'var(--bg2)',
+                  borderRadius: 12,
+                  padding: 3,
+                  gap: 3,
+                  border: '1px solid var(--sep)',
+                }}>
+                  {([
+                    { key: 'personal', label: `🍽️ 个人开销 (${stats.personalCategories.length})` },
+                    { key: 'fronted', label: `💳 我垫付的 (${stats.frontedCategories.length})` },
+                  ] as const).map(mode => {
+                    const isActive = categoryMode === mode.key
+                    return (
+                      <button
+                        key={mode.key}
+                        type="button"
+                        onClick={() => {
+                          setCategoryMode(mode.key)
+                          setSelectedCategory(null)
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '7px 0',
+                          borderRadius: 9,
+                          border: 'none',
+                          background: isActive ? 'var(--bg4)' : 'transparent',
+                          color: isActive ? 'var(--label)' : 'var(--label3)',
+                          fontSize: 12,
+                          fontWeight: isActive ? 700 : 500,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          transition: 'all 0.18s ease',
+                        }}
+                      >
+                        {mode.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <Section title={categoryMode === 'personal' ? '🍩 个人开销品类分布' : '🍩 垫付整笔品类分布'}>
                   <InteractiveDonutChart
                     data={donutData}
                     size={220}
-                    centerTitle="个人开销"
+                    centerTitle={categoryMode === 'personal' ? '个人开销' : '我垫付的'}
                     onSelectSlice={s => setSelectedCategory(s ? s.label : null)}
                   />
                 </Section>
 
-                <Section title="📋 各品类消费排行">
+                <Section title={categoryMode === 'personal' ? '📋 个人消费品类排行' : '📋 垫付开销品类排行'}>
                   <CategoryBreakdownList
-                    categories={stats.categories}
+                    categories={currentCategories}
                     highlightCategory={selectedCategory}
                     onCategoryClick={cat => setSelectedCategory(prev => prev === cat ? null : cat)}
                   />
