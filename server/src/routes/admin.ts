@@ -404,7 +404,7 @@ adminRoute.post('/codex/poll-token', async (c) => {
       }
 
       // Sync auth.json so Codex CLI runtime is immediately logged in
-      await syncCodexAuthFromDb();
+      await syncCodexAuthFromDb(true);
 
       return c.json({
         status: 'success',

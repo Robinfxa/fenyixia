@@ -4,7 +4,6 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
-import { refreshCodexAccessToken } from './codexAuth.js';
 import { LunaMessage, LunaResponse, CallLunaOptions } from './openai.js';
 
 export function getCodexDir(): string {
@@ -29,11 +28,70 @@ export function isCodexCliAvailable(): boolean {
 }
 
 /**
+ * Sync ~/.codex/auth.json tokens back into DuckDB system_settings
+ * whenever Codex CLI refreshes or updates its session tokens.
+ */
+export async function syncDbFromCodexAuth(authData?: any): Promise<boolean> {
+  try {
+    const codexDir = getCodexDir();
+    const authPath = path.join(codexDir, 'auth.json');
+    if (!authData) {
+      if (!fs.existsSync(authPath)) return false;
+      const raw = fs.readFileSync(authPath, 'utf8');
+      authData = JSON.parse(raw);
+    }
+    const tokens = authData?.tokens;
+    if (!tokens?.access_token) return false;
+
+    await db.run(
+      `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_token', ?, CURRENT_TIMESTAMP)`,
+      tokens.access_token
+    );
+    if (tokens.refresh_token) {
+      await db.run(
+        `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_refresh_token', ?, CURRENT_TIMESTAMP)`,
+        tokens.refresh_token
+      );
+    }
+    if (tokens.id_token) {
+      await db.run(
+        `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_id_token', ?, CURRENT_TIMESTAMP)`,
+        tokens.id_token
+      );
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Codex] Failed to sync auth from auth.json to DB:', err);
+    return false;
+  }
+}
+
+/**
  * Sync ChatGPT Codex OAuth token from DuckDB into ~/.codex/auth.json
  * so official `codex` CLI runtime can execute seamlessly using subscription quota.
+ *
+ * @param force If true, always overwrites ~/.codex/auth.json from DB (e.g. after fresh OAuth login).
+ *              If false, checks if auth.json already has valid tokens and syncs them to DB instead of clobbering.
  */
-export async function syncCodexAuthFromDb(): Promise<boolean> {
+export async function syncCodexAuthFromDb(force = false): Promise<boolean> {
   try {
+    const codexDir = getCodexDir();
+    const authPath = path.join(codexDir, 'auth.json');
+
+    // If not forced and auth.json already exists with valid token, sync auth.json -> DB to preserve Codex CLI's rotated tokens
+    if (!force && fs.existsSync(authPath)) {
+      try {
+        const raw = fs.readFileSync(authPath, 'utf8');
+        const currentAuth = JSON.parse(raw);
+        if (currentAuth?.tokens?.access_token) {
+          await syncDbFromCodexAuth(currentAuth);
+          return true;
+        }
+      } catch {
+        // If file is unparseable or corrupted, fall through to re-create from DB
+      }
+    }
+
     const rows = await db.query<{ key: string; value: string }>(
       "SELECT key, value FROM system_settings WHERE key IN ('openai_token', 'openai_refresh_token', 'openai_id_token', 'openai_account_email', 'openai_auth_mode')"
     );
@@ -54,37 +112,6 @@ export async function syncCodexAuthFromDb(): Promise<boolean> {
       return false;
     }
 
-    // If id_token is missing but we have a refresh_token, refresh to obtain id_token!
-    if (!idToken && refreshToken) {
-      try {
-        const refreshed = await refreshCodexAccessToken(refreshToken);
-        if (refreshed?.access_token) {
-          token = refreshed.access_token;
-          if (refreshed.id_token) idToken = refreshed.id_token;
-          if (refreshed.refresh_token) refreshToken = refreshed.refresh_token;
-
-          await db.run(
-            `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_token', ?, CURRENT_TIMESTAMP)`,
-            token
-          );
-          if (idToken) {
-            await db.run(
-              `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_id_token', ?, CURRENT_TIMESTAMP)`,
-              idToken
-            );
-          }
-          if (refreshToken) {
-            await db.run(
-              `INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('openai_refresh_token', ?, CURRENT_TIMESTAMP)`,
-              refreshToken
-            );
-          }
-        }
-      } catch (e) {
-        console.warn('[Codex] Auto-refresh to fetch id_token failed:', e);
-      }
-    }
-
     let accountId = '';
     try {
       const parts = token.split('.');
@@ -94,8 +121,6 @@ export async function syncCodexAuthFromDb(): Promise<boolean> {
       }
     } catch {}
 
-    const codexDir = getCodexDir();
-    const authPath = path.join(codexDir, 'auth.json');
     const authData = {
       OPENAI_API_KEY: null,
       auth_mode: 'chatgpt',
@@ -223,7 +248,7 @@ export async function callCodex(
       }
     });
 
-    proc.on('close', (code) => {
+    proc.on('close', async (code) => {
       clearTimeout(timeout);
       let content = '';
 
@@ -234,6 +259,9 @@ export async function callCodex(
       }
 
       cleanupTempFiles(tempFiles);
+
+      // Sync back any updated tokens if codex refreshed during execution
+      await syncDbFromCodexAuth();
 
       const duration = Date.now() - startTime;
       console.log(`[Codex] Process exited code=${code}, elapsed=${duration}ms, outputChars=${content.length}`);
@@ -252,6 +280,26 @@ export async function callCodex(
       }
 
       const combinedErr = (stderrData + '\n' + stdoutData).trim();
+
+      const isAuthError =
+        combinedErr.includes('refresh_token_reused') ||
+        combinedErr.includes('token_expired') ||
+        combinedErr.includes('Failed to refresh token') ||
+        combinedErr.includes('Please log out and sign in again') ||
+        combinedErr.includes('Provided authentication token is expired') ||
+        combinedErr.includes('401 Unauthorized');
+
+      if (isAuthError) {
+        try {
+          const codexDir = getCodexDir();
+          const authPath = path.join(codexDir, 'auth.json');
+          if (fs.existsSync(authPath)) fs.unlinkSync(authPath);
+        } catch {}
+
+        reject(new Error('OpenAI Codex 授权已过期（或已被刷新）。请管理员前往「管理后台 (/admin)」的 OpenAI/Codex 设置中，点击重新获取设备码并完成一次授权绑定。'));
+        return;
+      }
+
       if (combinedErr.includes("You've hit your usage limit") || combinedErr.includes('usage limit')) {
         reject(new Error('当前 ChatGPT Codex 配额已达上限，请稍后再试或在 ChatGPT 检查订阅状态'));
       } else if (combinedErr.includes('not supported when using Codex with a ChatGPT account')) {
