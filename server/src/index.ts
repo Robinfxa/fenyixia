@@ -20,7 +20,9 @@ import { tokensRoute } from './routes/tokens.js';
 import { settlementsRoute } from './routes/settlements.js';
 import { summaryRoute, contactsRoute } from './routes/agent.js';
 import { syncCodexAuthFromDb } from './ai/codex.js';
+import { runDatabaseBackup, startBackupScheduler, stopBackupScheduler } from './db/backup.js';
 import { AppEnv } from './types.js';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -185,6 +187,41 @@ app.get('/api', getApiDocs);
 app.get('/api/', getApiDocs);
 app.get('/api/docs', getApiDocs);
 
+// Internal scheduled backup endpoint (localhost-only, triggered by OS systemd timer with BACKUP_CRON_TOKEN)
+app.post('/api/internal/backup', async (c) => {
+  const forwarded = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const remoteAddr = (c.env as any)?.incoming?.socket?.remoteAddress || '';
+  const isLoopback = !remoteAddr || remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1';
+  if (forwarded || !isLoopback) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+
+  const expected = process.env.BACKUP_CRON_TOKEN || '';
+  if (!expected || expected.length < 16) {
+    return c.json({ error: 'Backup cron token not configured' }, 503);
+  }
+
+  const authHeader = c.req.header('Authorization') || '';
+  const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const providedBuf = Buffer.from(provided, 'utf8');
+
+  if (
+    expectedBuf.length !== providedBuf.length ||
+    !crypto.timingSafeEqual(expectedBuf, providedBuf)
+  ) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  try {
+    const summary = await runDatabaseBackup({ trigger: 'systemd-timer' });
+    return c.json({ success: true, backup: summary });
+  } catch (err: any) {
+    console.error('[Backup] Internal backup endpoint failed:', err);
+    return c.json({ error: err?.message || 'Backup failed' }, 500);
+  }
+});
+
 // Mount Routes
 app.route('/api/upload', uploadRoute);
 app.route('/api/auth', authRoute);
@@ -205,7 +242,10 @@ const PORT = Number(process.env.PORT) || 3001;
 
 // Initialize Database on launch and sync Codex auth if configured
 initDb()
-  .then(() => syncCodexAuthFromDb())
+  .then(async () => {
+    await syncCodexAuthFromDb();
+    startBackupScheduler();
+  })
   .catch((err) => {
     console.error('Database initialization failed:', err);
   });
@@ -219,6 +259,7 @@ const server = serve({
 
 const cleanup = async () => {
   console.log('Shutting down server...');
+  stopBackupScheduler();
   await closeDb();
   process.exit(0);
 };

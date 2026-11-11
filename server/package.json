@@ -9,6 +9,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "test:db": "tsx src/db/test.ts",
+    "test:backup": "tsx src/db/backup.test.ts",
     "test:e2e": "tsx src/test-e2e.ts",
     "test:ai-token": "tsx src/test-ai-token.ts",
     "clean": "tsx src/db/clean.ts",

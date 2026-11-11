@@ -4,6 +4,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { getSystemOpenAiConfig, normalizeModelName, callOpenAiApi } from '../ai/openai.js';
 import { requestCodexDeviceCode, pollCodexDeviceToken } from '../ai/codexAuth.js';
 import { syncCodexAuthFromDb, callCodex } from '../ai/codex.js';
+import { getBackupConfig, listBackups, runDatabaseBackup } from '../db/backup.js';
 import { AppEnv } from '../types.js';
 
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'robinfxa@gmail.com';
@@ -541,6 +542,36 @@ adminRoute.post('/public-url', async (c) => {
       public_api_base_url: '',
     });
   }
+});
+
+// GET /api/admin/backups (super admin only)
+adminRoute.get('/backups', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可查看备份列表' }, 403);
+  }
+  const cfg = getBackupConfig();
+  return c.json({
+    config: {
+      backup_dir: cfg.backupDir,
+      retention_days: cfg.retentionDays,
+      timezone: cfg.timeZone,
+      schedule_hour: cfg.scheduleHour,
+    },
+    backups: listBackups(cfg.backupDir),
+  });
+});
+
+// POST /api/admin/backups/run (super admin only)
+adminRoute.post('/backups/run', async (c) => {
+  const user = c.get('user');
+  const role = await getAdminRole(user.email);
+  if (role !== 'super_admin') {
+    return c.json({ error: '仅超级管理员可执行数据库备份' }, 403);
+  }
+  const backup = await runDatabaseBackup({ trigger: 'admin-manual' });
+  return c.json({ success: true, backup });
 });
 
 

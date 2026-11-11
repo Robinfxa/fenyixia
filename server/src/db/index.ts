@@ -32,6 +32,7 @@ class AsyncMutex {
 
 let dbInstance: duckdb.Database | null = null;
 let dbConnection: duckdb.Connection | null = null;
+let currentDbPath = '';
 const writeMutex = new AsyncMutex();
 
 export interface DbContext {
@@ -53,6 +54,41 @@ export function getConn(): duckdb.Connection {
     throw new Error('Database connection not initialized. Call initDb() first.');
   }
   return dbConnection;
+}
+
+export function getDbPath(): string {
+  return currentDbPath;
+}
+
+function createConnContext(conn: duckdb.Connection): DbContext {
+  const ctx: DbContext = {
+    query: (sql, ...params) => {
+      const cleanParams = params.map(p => p === undefined ? null : p);
+      return new Promise((resolve, reject) => {
+        conn.all(sql, ...cleanParams, (err, res) => {
+          if (err) return reject(err);
+          resolve(res as any);
+        });
+      });
+    },
+    queryOne: async (sql, ...params) => {
+      const rows = await ctx.query(sql, ...params);
+      return rows.length > 0 ? rows[0] : null;
+    },
+    run: (sql, ...params) => {
+      const cleanParams = params.map(p => p === undefined ? null : p);
+      return new Promise((resolve, reject) => {
+        conn.run(sql, ...cleanParams, (err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
+    },
+    transaction: async () => {
+      throw new Error('Nested transactions not supported');
+    },
+  };
+  return ctx;
 }
 
 export async function query<T = any>(sql: string, ...params: any[]): Promise<T[]> {
@@ -87,37 +123,19 @@ export async function run(sql: string, ...params: any[]): Promise<void> {
   }
 }
 
+export async function runExclusive<T>(fn: (ctx: DbContext) => Promise<T>): Promise<T> {
+  const unlock = await writeMutex.acquire();
+  try {
+    return await fn(createConnContext(getConn()));
+  } finally {
+    unlock();
+  }
+}
+
 export async function transaction<T>(fn: (tx: DbContext) => Promise<T>): Promise<T> {
   const unlock = await writeMutex.acquire();
   const conn = getConn();
-
-  const txContext: DbContext = {
-    query: (sql, ...params) => {
-      const cleanParams = params.map(p => p === undefined ? null : p);
-      return new Promise((resolve, reject) => {
-        conn.all(sql, ...cleanParams, (err, res) => {
-          if (err) return reject(err);
-          resolve(res as any);
-        });
-      });
-    },
-    queryOne: async (sql, ...params) => {
-      const rows = await txContext.query(sql, ...params);
-      return rows.length > 0 ? rows[0] : null;
-    },
-    run: (sql, ...params) => {
-      const cleanParams = params.map(p => p === undefined ? null : p);
-      return new Promise((resolve, reject) => {
-        conn.run(sql, ...cleanParams, (err) => {
-          if (err) return reject(err);
-          resolve();
-        });
-      });
-    },
-    transaction: async () => {
-      throw new Error('Nested transactions not supported');
-    }
-  };
+  const txContext = createConnContext(conn);
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -147,6 +165,7 @@ export async function transaction<T>(fn: (tx: DbContext) => Promise<T>): Promise
 
 export async function initDb(dbFilePath?: string): Promise<void> {
   const targetPath = dbFilePath || process.env.DB_PATH || './data/fenyixia.duckdb';
+  currentDbPath = targetPath;
 
   if (targetPath !== ':memory:') {
     const dir = path.dirname(targetPath);
@@ -310,6 +329,7 @@ export async function closeDb(): Promise<void> {
     });
     dbInstance = null;
   }
+  currentDbPath = '';
 }
 
 export const db: DbContext = {
